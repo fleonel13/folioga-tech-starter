@@ -4,13 +4,10 @@ import SearchBar from "@/components/SearchBar";
 export default async function RepairsPage() {
   return (
     <main>
-
       <section className="bg-slate-950 py-16 text-white">
-        <div className="container">
-
+        <div className="page-container">
           <div className="max-w-3xl">
-
-            <div className="badge badge-blue">
+            <div className="badge-primary">
               🔧 Service de réparation
             </div>
 
@@ -19,65 +16,58 @@ export default async function RepairsPage() {
             </h1>
 
             <p className="mt-5 text-lg leading-8 text-slate-300">
-              Décrivez votre problème et trouvez rapidement un
-              technicien qualifié.
+              Décrivez votre problème et trouvez rapidement un technicien
+              qualifié.
             </p>
-
           </div>
 
           <div className="mt-8 max-w-3xl">
             <SearchBar placeholder="Ex : écran cassé, batterie, Mac qui ne démarre plus..." />
           </div>
-
         </div>
       </section>
 
-      <section className="section">
-        <div className="container">
-
-          <h2 className="text-3xl font-black">
+      <section className="section-space">
+        <div className="page-container">
+          <h2 className="section-title">
             Quel appareil voulez-vous réparer ?
           </h2>
 
-          <p className="mt-2 text-slate-500">
+          <p className="section-subtitle">
             Sélectionnez une catégorie pour commencer.
           </p>
 
           <div className="mt-8 grid gap-5 md:grid-cols-2 lg:grid-cols-4">
-
             <ServiceCard
               icon="📱"
               title="Smartphone"
               description="Écran, batterie, caméra, connecteur..."
-              href="#"
+              href="/fr/repairs/smartphone"
             />
 
             <ServiceCard
               icon="💻"
               title="Ordinateur"
               description="Mac, PC, Windows, logiciels et matériel."
-              href="#"
+              href="/fr/repairs/ordinateur"
             />
 
             <ServiceCard
               icon="📲"
               title="Tablette"
               description="Écran, batterie et problèmes logiciels."
-              href="#"
+              href="/fr/repairs/tablette"
             />
 
             <ServiceCard
               icon="🎮"
               title="Console"
               description="Réparation et diagnostic de consoles."
-              href="#"
+              href="/fr/repairs/console"
             />
-
           </div>
-
         </div>
       </section>
-
     </main>
   );
 }
