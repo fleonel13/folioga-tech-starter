@@ -1,0 +1,25 @@
+components/
+├── Navbar.tsx
+├── Footer.tsx
+├── Button.tsx
+├── SearchBar.tsx
+├── ProductCard.tsx
+├── ProductGrid.tsx
+├── ProductFilters.tsx
+├── TechnicianCard.tsx
+├── TechnicianGrid.tsx
+├── Rating.tsx
+├── Badge.tsx
+├── ServiceCard.tsx
+└── ReviewCard.tsx
+
+app/[locale]/
+├── page.tsx
+├── repairs/page.tsx
+├── technicians/page.tsx
+├── technicians/[id]/page.tsx
+├── shop/page.tsx
+├── shop/[id]/page.tsx
+├── cart/page.tsx
+└── dashboard/page.tsx
+cc

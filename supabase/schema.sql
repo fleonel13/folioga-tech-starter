@@ -1,0 +1,11 @@
+create extension if not exists "uuid-ossp";
+create table profiles(id uuid primary key references auth.users on delete cascade, role text check(role in ('client','technician','admin')) default 'client', full_name text, country text, city text, languages text[] default '{}', created_at timestamptz default now());
+create table technician_profiles(id uuid primary key references profiles(id) on delete cascade, bio text, skills text[] default '{}', remote_support boolean default false, hourly_rate numeric, rating numeric default 0);
+create table repair_requests(id uuid primary key default uuid_generate_v4(), client_id uuid references profiles(id), title text not null, device_type text, description text, country text, city text, budget numeric, status text default 'open', created_at timestamptz default now());
+create table quotes(id uuid primary key default uuid_generate_v4(), request_id uuid references repair_requests(id) on delete cascade, technician_id uuid references profiles(id), amount numeric not null, message text, status text default 'pending', created_at timestamptz default now());
+create table products(id uuid primary key default uuid_generate_v4(), name text not null, description text, price numeric not null, currency text default 'EUR', stock int default 0, condition text default 'refurbished', active boolean default true, created_at timestamptz default now());
+create table orders(id uuid primary key default uuid_generate_v4(), user_id uuid references profiles(id), stripe_session_id text unique, amount numeric, currency text, status text default 'pending', created_at timestamptz default now());
+create table messages(id uuid primary key default uuid_generate_v4(), sender_id uuid references profiles(id), recipient_id uuid references profiles(id), body text not null, created_at timestamptz default now());
+alter table profiles enable row level security; alter table repair_requests enable row level security; alter table quotes enable row level security; alter table products enable row level security;
+create policy "public products" on products for select using(active=true);
+create policy "users own profile" on profiles for select using(auth.uid()=id);
