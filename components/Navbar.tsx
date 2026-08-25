@@ -16,19 +16,22 @@ export default function Navbar() {
   const base = `/${locale}`;
 
   const links = [
-    { href: base, label: locale === 'fr' ? 'Accueil' : 'Home' },
+    {
+      href: base,
+      label: locale === 'fr' ? 'Accueil' : 'Home',
+    },
     {
       href: `${base}/repairs`,
-      label: locale === 'fr' ? 'Réparations' : 'Repairs'
+      label: locale === 'fr' ? 'Réparations' : 'Repairs',
     },
     {
       href: `${base}/technicians`,
-      label: locale === 'fr' ? 'Techniciens' : 'Technicians'
+      label: locale === 'fr' ? 'Techniciens' : 'Technicians',
     },
     {
       href: `${base}/shop`,
-      label: locale === 'fr' ? 'Boutique' : 'Shop'
-    }
+      label: locale === 'fr' ? 'Boutique' : 'Shop',
+    },
   ];
 
   const isActive = (href: string) => {
@@ -44,128 +47,164 @@ export default function Navbar() {
       ? pathname?.replace(/^\/fr/, '/en')
       : pathname?.replace(/^\/en/, '/fr');
 
-  return (
-    <header className="sticky top-0 z-50 border-b border-slate-200/80 bg-white/90 backdrop-blur-xl">
-      <div className="mx-auto flex h-20 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
+  const closeMenu = () => setOpen(false);
 
+  return (
+    <header className="sticky top-0 z-50 border-b border-slate-200/70 bg-white/85 backdrop-blur-xl">
+      <div className="page-container flex h-[76px] items-center justify-between">
+
+        {/* Logo */}
         <Link
           href={base}
-          className="flex items-center gap-3"
+          onClick={closeMenu}
+          className="group flex items-center gap-3"
         >
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-950 text-lg shadow-lg shadow-slate-950/20">
-            ⚡
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-950 text-lg text-white shadow-lg shadow-slate-950/15 transition-all duration-300 group-hover:-rotate-3 group-hover:bg-blue-600">
+            F
           </div>
 
-          <div>
+          <div className="leading-none">
             <div className="text-lg font-black tracking-tight text-slate-950">
               Folioga<span className="text-blue-600">Tech</span>
             </div>
 
-            <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">
+            <div className="mt-1 text-[9px] font-bold uppercase tracking-[0.2em] text-slate-400">
               Tech seconde vie
             </div>
           </div>
         </Link>
 
+        {/* Desktop navigation */}
         <nav className="hidden items-center gap-1 lg:flex">
-          {links.map((link) => (
-            <Link
-              key={link.href}
-              href={link.href}
-              className={`rounded-xl px-4 py-2 text-sm font-bold transition ${
-                isActive(link.href)
-                  ? 'bg-blue-50 text-blue-700'
-                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-950'
-              }`}
-            >
-              {link.label}
-            </Link>
-          ))}
+          {links.map((link) => {
+            const active = isActive(link.href);
+
+            return (
+              <Link
+                key={link.href}
+                href={link.href}
+                className={`relative rounded-xl px-4 py-2.5 text-sm font-bold transition-all duration-200 ${
+                  active
+                    ? 'bg-blue-50 text-blue-700'
+                    : 'text-slate-600 hover:bg-slate-50 hover:text-slate-950'
+                }`}
+              >
+                {link.label}
+
+                {active && (
+                  <span className="absolute bottom-1 left-1/2 h-1 w-1 -translate-x-1/2 rounded-full bg-blue-600" />
+                )}
+              </Link>
+            );
+          })}
         </nav>
 
+        {/* Desktop actions */}
         <div className="hidden items-center gap-2 sm:flex">
+
+          {/* Language */}
           <Link
             href={switchLocale || '/fr'}
-            className="rounded-xl px-3 py-2 text-xs font-bold text-slate-500 transition hover:bg-slate-100"
+            className="rounded-xl px-3 py-2 text-xs font-black tracking-wide text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
           >
             {locale === 'fr' ? 'EN' : 'FR'}
           </Link>
 
+          {/* Cart */}
           <Link
             href={`${base}/cart`}
-            className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-slate-700 transition hover:border-blue-300 hover:bg-blue-50"
+            className="group relative flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 transition-all duration-200 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+            aria-label={locale === 'fr' ? 'Panier' : 'Cart'}
           >
-            🛒
+            <span className="text-base">🛒</span>
           </Link>
 
+          {/* Dashboard */}
           <Link
             href={`${base}/dashboard`}
-            className="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-slate-950/20 transition hover:bg-blue-600"
+            className="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-slate-950/15 transition-all duration-300 hover:-translate-y-0.5 hover:bg-blue-600 hover:shadow-blue-600/20"
           >
             {locale === 'fr' ? 'Mon espace' : 'Dashboard'}
           </Link>
         </div>
 
+        {/* Mobile menu button */}
         <button
           type="button"
           onClick={() => setOpen(!open)}
-          className="rounded-xl border border-slate-200 p-2.5 text-slate-700 lg:hidden"
-          aria-label="Menu"
+          className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 lg:hidden"
+          aria-label={open ? 'Fermer le menu' : 'Ouvrir le menu'}
+          aria-expanded={open}
         >
-          {open ? '✕' : '☰'}
+          <span className="text-lg">
+            {open ? '✕' : '☰'}
+          </span>
         </button>
       </div>
 
-      {open && (
-        <div className="border-t border-slate-200 bg-white px-4 py-4 lg:hidden">
-          <div className="mx-auto flex max-w-7xl flex-col gap-2">
+      {/* Mobile navigation */}
+      <div
+        className={`overflow-hidden border-t border-slate-200/70 bg-white transition-all duration-300 lg:hidden ${
+          open
+            ? 'max-h-[500px] opacity-100'
+            : 'max-h-0 opacity-0'
+        }`}
+      >
+        <div className="page-container py-4">
 
-            {links.map((link) => (
-              <Link
-                key={link.href}
-                href={link.href}
-                onClick={() => setOpen(false)}
-                className={`rounded-xl px-4 py-3 font-bold ${
-                  isActive(link.href)
-                    ? 'bg-blue-50 text-blue-700'
-                    : 'text-slate-700 hover:bg-slate-100'
-                }`}
-              >
-                {link.label}
-              </Link>
-            ))}
+          <nav className="flex flex-col gap-1">
+            {links.map((link) => {
+              const active = isActive(link.href);
 
-            <div className="mt-2 grid grid-cols-2 gap-2">
-              <Link
-                href={`${base}/cart`}
-                onClick={() => setOpen(false)}
-                className="rounded-xl border border-slate-200 px-4 py-3 text-center font-bold"
-              >
-                🛒 Panier
-              </Link>
+              return (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  onClick={closeMenu}
+                  className={`rounded-xl px-4 py-3.5 text-sm font-bold transition ${
+                    active
+                      ? 'bg-blue-50 text-blue-700'
+                      : 'text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  {link.label}
+                </Link>
+              );
+            })}
+          </nav>
 
-              <Link
-                href={`${base}/dashboard`}
-                onClick={() => setOpen(false)}
-                className="rounded-xl bg-slate-950 px-4 py-3 text-center font-bold text-white"
-              >
-                {locale === 'fr' ? 'Mon espace' : 'Dashboard'}
-              </Link>
-            </div>
+          <div className="mt-3 grid grid-cols-2 gap-2">
 
             <Link
-              href={switchLocale || '/fr'}
-              onClick={() => setOpen(false)}
-              className="mt-1 rounded-xl px-4 py-3 text-center font-bold text-slate-500 hover:bg-slate-100"
+              href={`${base}/cart`}
+              onClick={closeMenu}
+              className="rounded-xl border border-slate-200 px-4 py-3 text-center text-sm font-bold text-slate-700 transition hover:border-blue-200 hover:bg-blue-50"
             >
-              {locale === 'fr'
-                ? 'Switch to English'
-                : 'Passer en français'}
+              🛒 {locale === 'fr' ? 'Panier' : 'Cart'}
+            </Link>
+
+            <Link
+              href={`${base}/dashboard`}
+              onClick={closeMenu}
+              className="rounded-xl bg-slate-950 px-4 py-3 text-center text-sm font-bold text-white transition hover:bg-blue-600"
+            >
+              {locale === 'fr' ? 'Mon espace' : 'Dashboard'}
             </Link>
 
           </div>
+
+          <Link
+            href={switchLocale || '/fr'}
+            onClick={closeMenu}
+            className="mt-2 block rounded-xl px-4 py-3 text-center text-sm font-bold text-slate-500 transition hover:bg-slate-50 hover:text-slate-900"
+          >
+            {locale === 'fr'
+              ? 'Passer en anglais'
+              : 'Passer en français'}
+          </Link>
+
         </div>
-      )}
+      </div>
     </header>
   );
 }
