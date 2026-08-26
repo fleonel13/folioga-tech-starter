@@ -1,36 +1,36 @@
-'use client';
+"use client";
 
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import { useState } from 'react';
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { useState } from "react";
 
 export default function Navbar() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
 
-  const locale =
-    pathname?.split('/')[1] === 'en'
-      ? 'en'
-      : 'fr';
-
+  const locale = pathname?.split("/")[1] === "en" ? "en" : "fr";
   const base = `/${locale}`;
 
   const links = [
     {
       href: base,
-      label: locale === 'fr' ? 'Accueil' : 'Home',
+      label: locale === "fr" ? "Accueil" : "Home",
     },
     {
       href: `${base}/repairs`,
-      label: locale === 'fr' ? 'Réparations' : 'Repairs',
+      label: locale === "fr" ? "Réparations" : "Repairs",
     },
     {
       href: `${base}/technicians`,
-      label: locale === 'fr' ? 'Techniciens' : 'Technicians',
+      label: locale === "fr" ? "Techniciens" : "Technicians",
     },
     {
       href: `${base}/shop`,
-      label: locale === 'fr' ? 'Boutique' : 'Shop',
+      label: locale === "fr" ? "Boutique" : "Shop",
+    },
+    {
+      href: `${base}/posts`,
+      label: locale === "fr" ? "Réalisations" : "Projects",
     },
   ];
 
@@ -43,9 +43,9 @@ export default function Navbar() {
   };
 
   const switchLocale =
-    locale === 'fr'
-      ? pathname?.replace(/^\/fr/, '/en')
-      : pathname?.replace(/^\/en/, '/fr');
+    locale === "fr"
+      ? pathname?.replace(/^\/fr/, "/en")
+      : pathname?.replace(/^\/en/, "/fr");
 
   const closeMenu = () => setOpen(false);
 
@@ -85,8 +85,8 @@ export default function Navbar() {
                 href={link.href}
                 className={`relative rounded-xl px-4 py-2.5 text-sm font-bold transition-all duration-200 ${
                   active
-                    ? 'bg-blue-50 text-blue-700'
-                    : 'text-slate-600 hover:bg-slate-50 hover:text-slate-950'
+                    ? "bg-blue-50 text-blue-700"
+                    : "text-slate-600 hover:bg-slate-50 hover:text-slate-950"
                 }`}
               >
                 {link.label}
@@ -104,17 +104,17 @@ export default function Navbar() {
 
           {/* Language */}
           <Link
-            href={switchLocale || '/fr'}
+            href={switchLocale || "/fr"}
             className="rounded-xl px-3 py-2 text-xs font-black tracking-wide text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
           >
-            {locale === 'fr' ? 'EN' : 'FR'}
+            {locale === "fr" ? "EN" : "FR"}
           </Link>
 
           {/* Cart */}
           <Link
             href={`${base}/cart`}
             className="group relative flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 transition-all duration-200 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
-            aria-label={locale === 'fr' ? 'Panier' : 'Cart'}
+            aria-label={locale === "fr" ? "Panier" : "Cart"}
           >
             <span className="text-base">🛒</span>
           </Link>
@@ -124,7 +124,7 @@ export default function Navbar() {
             href={`${base}/dashboard`}
             className="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-slate-950/15 transition-all duration-300 hover:-translate-y-0.5 hover:bg-blue-600 hover:shadow-blue-600/20"
           >
-            {locale === 'fr' ? 'Mon espace' : 'Dashboard'}
+            {locale === "fr" ? "Mon espace" : "Dashboard"}
           </Link>
         </div>
 
@@ -133,11 +133,11 @@ export default function Navbar() {
           type="button"
           onClick={() => setOpen(!open)}
           className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 lg:hidden"
-          aria-label={open ? 'Fermer le menu' : 'Ouvrir le menu'}
+          aria-label={open ? "Fermer le menu" : "Ouvrir le menu"}
           aria-expanded={open}
         >
           <span className="text-lg">
-            {open ? '✕' : '☰'}
+            {open ? "✕" : "☰"}
           </span>
         </button>
       </div>
@@ -146,8 +146,8 @@ export default function Navbar() {
       <div
         className={`overflow-hidden border-t border-slate-200/70 bg-white transition-all duration-300 lg:hidden ${
           open
-            ? 'max-h-[500px] opacity-100'
-            : 'max-h-0 opacity-0'
+            ? "max-h-[600px] opacity-100"
+            : "max-h-0 opacity-0"
         }`}
       >
         <div className="page-container py-4">
@@ -163,8 +163,8 @@ export default function Navbar() {
                   onClick={closeMenu}
                   className={`rounded-xl px-4 py-3.5 text-sm font-bold transition ${
                     active
-                      ? 'bg-blue-50 text-blue-700'
-                      : 'text-slate-700 hover:bg-slate-50'
+                      ? "bg-blue-50 text-blue-700"
+                      : "text-slate-700 hover:bg-slate-50"
                   }`}
                 >
                   {link.label}
@@ -175,32 +175,35 @@ export default function Navbar() {
 
           <div className="mt-3 grid grid-cols-2 gap-2">
 
+            {/* Cart */}
             <Link
               href={`${base}/cart`}
               onClick={closeMenu}
               className="rounded-xl border border-slate-200 px-4 py-3 text-center text-sm font-bold text-slate-700 transition hover:border-blue-200 hover:bg-blue-50"
             >
-              🛒 {locale === 'fr' ? 'Panier' : 'Cart'}
+              🛒 {locale === "fr" ? "Panier" : "Cart"}
             </Link>
 
+            {/* Dashboard */}
             <Link
               href={`${base}/dashboard`}
               onClick={closeMenu}
               className="rounded-xl bg-slate-950 px-4 py-3 text-center text-sm font-bold text-white transition hover:bg-blue-600"
             >
-              {locale === 'fr' ? 'Mon espace' : 'Dashboard'}
+              {locale === "fr" ? "Mon espace" : "Dashboard"}
             </Link>
 
           </div>
 
+          {/* Language */}
           <Link
-            href={switchLocale || '/fr'}
+            href={switchLocale || "/fr"}
             onClick={closeMenu}
             className="mt-2 block rounded-xl px-4 py-3 text-center text-sm font-bold text-slate-500 transition hover:bg-slate-50 hover:text-slate-900"
           >
-            {locale === 'fr'
-              ? 'Passer en anglais'
-              : 'Passer en français'}
+            {locale === "fr"
+              ? "Passer en anglais"
+              : "Passer en français"}
           </Link>
 
         </div>
