@@ -7,6 +7,7 @@ import { supabase } from "@/lib/supabase";
 type Profile = {
   id: string;
   email: string | null;
+  name: string | null;
   role: string | null;
 };
 
@@ -62,7 +63,7 @@ export default function PostsPage({
         return;
       }
 
-      // Récupération des profils correspondant aux auteurs
+      // Récupération des profils des auteurs
       const userIds = [
         ...new Set(
           postsData
@@ -76,7 +77,7 @@ export default function PostsPage({
       if (userIds.length > 0) {
         const { data: profilesData, error: profilesError } = await supabase
           .from("profiles")
-          .select("id, email, role")
+          .select("id, email, name, role")
           .in("id", userIds);
 
         if (profilesError) {
@@ -226,9 +227,17 @@ export default function PostsPage({
                       👤 Auteur
                     </div>
 
-                    <div className="mt-1 break-all text-sm text-slate-600">
-                      {post.profile?.email ?? "Utilisateur"}
+                    <div className="mt-1 text-sm font-semibold text-slate-700">
+                      {post.profile?.name ||
+                        post.profile?.email ||
+                        "Utilisateur"}
                     </div>
+
+                    {post.profile?.email && post.profile?.name && (
+                      <div className="mt-1 break-all text-xs text-slate-400">
+                        {post.profile.email}
+                      </div>
+                    )}
 
                     <div className="mt-2 text-xs font-bold uppercase tracking-wide text-blue-600">
                       🔧 {getRoleLabel(post.profile?.role)}
