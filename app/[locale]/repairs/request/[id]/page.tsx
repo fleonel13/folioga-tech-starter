@@ -4,6 +4,7 @@ import Link from "next/link";
 import { use, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import RepairMessages from "@/components/repairs/RepairMessages";
+import RepairPhotos from "@/components/repairs/RepairPhotos";
 
 type RepairRequest = {
   id: string;
@@ -559,8 +560,7 @@ export default function RepairRequestDetailPage({
 
             <div>
               <div className="text-sm font-bold text-blue-600">
-                {request.device_type ||
-                  "Appareil"}
+                {request.device_type || "Appareil"}
               </div>
 
               <h1 className="mt-2 text-3xl font-black text-slate-950">
@@ -571,14 +571,10 @@ export default function RepairRequestDetailPage({
             <span
               className={
                 "h-fit w-fit rounded-full px-4 py-2 text-sm font-bold " +
-                getStatusClass(
-                  request.status
-                )
+                getStatusClass(request.status)
               }
             >
-              {getStatusLabel(
-                request.status
-              )}
+              {getStatusLabel(request.status)}
             </span>
 
           </div>
@@ -633,9 +629,7 @@ export default function RepairRequestDetailPage({
               <div className="mt-1 text-slate-500">
                 {new Date(
                   request.created_at
-                ).toLocaleDateString(
-                  "fr-FR"
-                )}
+                ).toLocaleDateString("fr-FR")}
               </div>
             </div>
 
@@ -669,18 +663,13 @@ export default function RepairRequestDetailPage({
               Faites évoluer le statut de la mission lorsque vous commencez puis terminez la réparation.
             </p>
 
-            {request.status ===
-              "assigned" && (
+            {request.status === "assigned" && (
               <button
                 type="button"
                 onClick={() =>
-                  updateRepairStatus(
-                    "in_progress"
-                  )
+                  updateRepairStatus("in_progress")
                 }
-                disabled={
-                  updatingStatus
-                }
+                disabled={updatingStatus}
                 className="mt-6 w-full rounded-xl bg-blue-600 px-5 py-3 font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {updatingStatus
@@ -689,18 +678,13 @@ export default function RepairRequestDetailPage({
               </button>
             )}
 
-            {request.status ===
-              "in_progress" && (
+            {request.status === "in_progress" && (
               <button
                 type="button"
                 onClick={() =>
-                  updateRepairStatus(
-                    "completed"
-                  )
+                  updateRepairStatus("completed")
                 }
-                disabled={
-                  updatingStatus
-                }
+                disabled={updatingStatus}
                 className="mt-6 w-full rounded-xl bg-emerald-600 px-5 py-3 font-bold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {updatingStatus
@@ -709,8 +693,7 @@ export default function RepairRequestDetailPage({
               </button>
             )}
 
-            {request.status ===
-              "completed" && (
+            {request.status === "completed" && (
               <div className="mt-6 rounded-xl bg-emerald-100 px-5 py-4 text-center font-bold text-emerald-700">
                 ✅ Cette réparation est terminée.
               </div>
@@ -724,6 +707,14 @@ export default function RepairRequestDetailPage({
         ==================================================== */}
 
         <RepairMessages
+          repairRequestId={request.id}
+        />
+
+        {/* ====================================================
+            PHOTOS DE LA RÉPARATION
+        ==================================================== */}
+
+        <RepairPhotos
           repairRequestId={request.id}
         />
 
@@ -742,8 +733,7 @@ export default function RepairRequestDetailPage({
               Les techniciens qui souhaitent intervenir sur votre réparation.
             </p>
 
-            {technicians.length ===
-            0 ? (
+            {technicians.length === 0 ? (
               <div className="mt-6 rounded-3xl border border-slate-200 bg-white p-10 text-center">
 
                 <div className="text-5xl">
@@ -765,9 +755,7 @@ export default function RepairRequestDetailPage({
                 {technicians.map(
                   (technician) => (
                     <article
-                      key={
-                        technician.id
-                      }
+                      key={technician.id}
                       className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"
                     >
 
@@ -799,35 +787,29 @@ export default function RepairRequestDetailPage({
                             technician.country,
                           ]
                             .filter(Boolean)
-                            .join(
-                              ", "
-                            )}
+                            .join(", ")}
                         </p>
                       )}
 
-                      {request.status ===
-                        "assigned" && (
+                      {request.status === "assigned" && (
                         <div className="mt-5 rounded-xl bg-orange-50 px-5 py-3 text-center font-bold text-orange-700">
                           🟠 Technicien accepté
                         </div>
                       )}
 
-                      {request.status ===
-                        "in_progress" && (
+                      {request.status === "in_progress" && (
                         <div className="mt-5 rounded-xl bg-blue-50 px-5 py-3 text-center font-bold text-blue-700">
                           🔵 Réparation en cours
                         </div>
                       )}
 
-                      {request.status ===
-                        "completed" && (
+                      {request.status === "completed" && (
                         <div className="mt-5 rounded-xl bg-emerald-50 px-5 py-3 text-center font-bold text-emerald-700">
                           ✅ Réparation terminée
                         </div>
                       )}
 
-                      {request.status ===
-                        "open" && (
+                      {request.status === "open" && (
                         <button
                           type="button"
                           onClick={() =>
@@ -836,13 +818,11 @@ export default function RepairRequestDetailPage({
                             )
                           }
                           disabled={
-                            acceptingId ===
-                            technician.id
+                            acceptingId === technician.id
                           }
                           className="mt-5 w-full rounded-xl bg-slate-950 px-5 py-3 font-bold text-white hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
                         >
-                          {acceptingId ===
-                          technician.id
+                          {acceptingId === technician.id
                             ? "Acceptation..."
                             : "Accepter ce technicien →"}
                         </button>
