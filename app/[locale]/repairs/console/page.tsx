@@ -83,7 +83,7 @@ export default function ConsoleRepairsPage() {
                 </p>
 
                 <Link
-                  href="/fr/technicians"
+                  href={`/fr/repairs/request?device=Console&problem=${encodeURIComponent(problem.title)}`}
                   className="mt-6 inline-flex font-bold text-blue-600 hover:text-blue-700"
                 >
                   Trouver un technicien →
@@ -106,7 +106,7 @@ export default function ConsoleRepairsPage() {
           </p>
 
           <Link
-            href="/fr/technicians"
+            href="/fr/repairs/request?device=Console&problem=Autre%20probl%C3%A8me"
             className="mt-7 inline-flex rounded-xl bg-white px-6 py-3 font-black text-blue-700 hover:bg-blue-50"
           >
             Trouver un technicien

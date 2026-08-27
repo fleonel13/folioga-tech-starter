@@ -1,0 +1,544 @@
+"use client";
+
+import Link from "next/link";
+import { use, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase";
+
+type UserProfile = {
+  email: string;
+  role: "client" | "technicien";
+};
+
+type RepairRequest = {
+  id: string;
+  client_id: string;
+  title: string;
+  device_type: string | null;
+  description: string | null;
+  country: string | null;
+  city: string | null;
+  budget: number | null;
+  status: string | null;
+  created_at: string;
+};
+
+type RepairInterest = {
+  repair_request_id: string;
+  technician_id: string;
+  status: string | null;
+};
+
+export default function DashboardPage({
+  params,
+}: {
+  params: Promise<{ locale: string }>;
+}) {
+  const { locale } = use(params);
+  const router = useRouter();
+
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [repairs, setRepairs] = useState<RepairRequest[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [repairsLoading, setRepairsLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
+
+  useEffect(() => {
+    async function loadUser() {
+      setLoading(true);
+      setErrorMessage("");
+
+      const {
+        data: { user },
+        error,
+      } = await supabase.auth.getUser();
+
+      if (error || !user) {
+        router.replace("/" + locale + "/login");
+        return;
+      }
+
+      const { data: profileData } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", user.id)
+        .single();
+
+      const metadataRole = user.user_metadata?.role;
+
+      const role =
+        profileData?.role === "technicien" ||
+        profileData?.role === "technician" ||
+        metadataRole === "technicien" ||
+        metadataRole === "technician"
+          ? "technicien"
+          : "client";
+
+      setProfile({
+        email: user.email || "",
+        role,
+      });
+
+      if (role === "technicien") {
+        await loadTechnicianRepairs(user.id);
+      }
+
+      setLoading(false);
+    }
+
+    loadUser();
+  }, [locale, router]);
+
+  async function loadTechnicianRepairs(technicianId: string) {
+    setRepairsLoading(true);
+
+    const { data: interests, error: interestsError } =
+      await supabase
+        .from("repair_interests")
+        .select("repair_request_id, technician_id, status")
+        .eq("technician_id", technicianId)
+        .eq("status", "accepted");
+
+    if (interestsError) {
+      console.error(
+        "Erreur chargement intérêts technicien :",
+        interestsError
+      );
+
+      setRepairs([]);
+      setRepairsLoading(false);
+      return;
+    }
+
+    if (!interests || interests.length === 0) {
+      setRepairs([]);
+      setRepairsLoading(false);
+      return;
+    }
+
+    const requestIds = interests.map(
+      (interest: RepairInterest) => interest.repair_request_id
+    );
+
+    const { data: requests, error: requestsError } =
+      await supabase
+        .from("repair_requests")
+        .select(
+          "id, client_id, title, device_type, description, country, city, budget, status, created_at"
+        )
+        .in("id", requestIds)
+        .order("created_at", { ascending: false });
+
+    if (requestsError) {
+      console.error(
+        "Erreur chargement réparations :",
+        requestsError
+      );
+
+      setRepairs([]);
+      setRepairsLoading(false);
+      return;
+    }
+
+    setRepairs(requests || []);
+    setRepairsLoading(false);
+  }
+
+  async function handleLogout() {
+    await supabase.auth.signOut();
+
+    router.push("/" + locale);
+    router.refresh();
+  }
+
+  if (loading) {
+    return (
+      <main className="section">
+        <div className="container">
+          <div className="card p-10 text-center">
+            <p className="font-semibold text-slate-500">
+              Chargement de votre espace...
+            </p>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  if (!profile) {
+    return null;
+  }
+
+  const isTechnician = profile.role === "technicien";
+
+  return (
+    <main className="section">
+      <div className="container">
+
+        <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-end">
+          <div>
+            <div className="text-sm font-bold text-blue-600">
+              MON ESPACE
+            </div>
+
+            <h1 className="mt-2 text-4xl font-black">
+              Bienvenue 👋
+            </h1>
+
+            <p className="mt-2 text-slate-500">
+              Gérez votre compte et vos activités Folioga-Tech.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="btn btn-dark"
+          >
+            Se déconnecter
+          </button>
+        </div>
+
+        <section className="card mt-8 p-6">
+          <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+
+            <div className="flex items-center gap-4">
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50 text-2xl">
+                {isTechnician ? "🔧" : "👤"}
+              </div>
+
+              <div>
+                <h2 className="text-xl font-black text-slate-950">
+                  {isTechnician
+                    ? "Compte technicien"
+                    : "Compte client"}
+                </h2>
+
+                <p className="mt-1 text-sm text-slate-500">
+                  {profile.email}
+                </p>
+              </div>
+            </div>
+
+            <span className="w-fit rounded-full bg-blue-50 px-4 py-2 text-sm font-bold text-blue-700">
+              {isTechnician ? "Technicien" : "Client"}
+            </span>
+
+          </div>
+        </section>
+
+        <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+
+          <div className="card p-5">
+            <div className="flex items-center justify-between">
+              <span className="text-2xl">🔧</span>
+
+              <span className="text-3xl font-black">
+                {isTechnician ? repairs.length : 0}
+              </span>
+            </div>
+
+            <div className="mt-4 font-semibold text-slate-500">
+              {isTechnician ? "Missions acceptées" : "Réparations"}
+            </div>
+          </div>
+
+          <div className="card p-5">
+            <div className="flex items-center justify-between">
+              <span className="text-2xl">📦</span>
+
+              <span className="text-3xl font-black">
+                0
+              </span>
+            </div>
+
+            <div className="mt-4 font-semibold text-slate-500">
+              Commandes
+            </div>
+          </div>
+
+          <div className="card p-5">
+            <div className="flex items-center justify-between">
+              <span className="text-2xl">❤️</span>
+
+              <span className="text-3xl font-black">
+                0
+              </span>
+            </div>
+
+            <div className="mt-4 font-semibold text-slate-500">
+              Favoris
+            </div>
+          </div>
+
+          <div className="card p-5">
+            <div className="flex items-center justify-between">
+              <span className="text-2xl">💬</span>
+
+              <span className="text-3xl font-black">
+                0
+              </span>
+            </div>
+
+            <div className="mt-4 font-semibold text-slate-500">
+              Messages
+            </div>
+          </div>
+
+        </div>
+
+        {isTechnician && (
+          <section className="mt-8">
+
+            <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
+              <div>
+                <div className="text-sm font-bold uppercase tracking-widest text-blue-600">
+                  🔧 Mes missions
+                </div>
+
+                <h2 className="mt-2 text-2xl font-black text-slate-950">
+                  Réparations acceptées
+                </h2>
+
+                <p className="mt-2 text-slate-500">
+                  Retrouvez les demandes pour lesquelles le client vous a accepté.
+                </p>
+              </div>
+
+              <Link
+                href={"/" + locale + "/repairs/requests"}
+                className="btn btn-secondary"
+              >
+                Voir les demandes
+              </Link>
+            </div>
+
+            {repairsLoading ? (
+              <div className="card mt-6 p-10 text-center">
+                <p className="font-semibold text-slate-500">
+                  Chargement de vos missions...
+                </p>
+              </div>
+            ) : repairs.length === 0 ? (
+              <div className="card mt-6 p-10 text-center">
+
+                <div className="text-5xl">
+                  🔧
+                </div>
+
+                <h3 className="mt-4 text-xl font-black text-slate-950">
+                  Aucune mission acceptée
+                </h3>
+
+                <p className="mx-auto mt-2 max-w-md text-slate-500">
+                  Lorsqu'un client acceptera votre candidature,
+                  la réparation apparaîtra ici.
+                </p>
+
+                <Link
+                  href={"/" + locale + "/repairs/requests"}
+                  className="mt-6 inline-flex rounded-xl bg-slate-950 px-5 py-3 font-bold text-white hover:bg-blue-600"
+                >
+                  Voir les demandes disponibles →
+                </Link>
+
+              </div>
+            ) : (
+              <div className="mt-6 grid gap-5 md:grid-cols-2">
+
+                {repairs.map((repair) => (
+                  <article
+                    key={repair.id}
+                    className="card p-6"
+                  >
+
+                    <div className="flex items-start justify-between gap-4">
+
+                      <div>
+                        <div className="text-sm font-bold text-blue-600">
+                          {repair.device_type || "Appareil"}
+                        </div>
+
+                        <h3 className="mt-2 text-xl font-black text-slate-950">
+                          {repair.title}
+                        </h3>
+                      </div>
+
+                      <span className="shrink-0 rounded-full bg-green-50 px-3 py-2 text-xs font-bold text-green-700">
+                        ✅ Acceptée
+                      </span>
+
+                    </div>
+
+                    {repair.description && (
+                      <p className="mt-4 line-clamp-3 text-slate-600">
+                        {repair.description}
+                      </p>
+                    )}
+
+                    <div className="mt-5 space-y-3 border-t border-slate-100 pt-5 text-sm">
+
+                      {(repair.city || repair.country) && (
+                        <div>
+                          <span className="font-bold text-slate-700">
+                            📍 Localisation :
+                          </span>{" "}
+                          <span className="text-slate-500">
+                            {[repair.city, repair.country]
+                              .filter(Boolean)
+                              .join(", ")}
+                          </span>
+                        </div>
+                      )}
+
+                      {repair.budget !== null && (
+                        <div>
+                          <span className="font-bold text-slate-700">
+                            💰 Budget :
+                          </span>{" "}
+                          <span className="text-slate-500">
+                            {repair.budget} €
+                          </span>
+                        </div>
+                      )}
+
+                      <div>
+                        <span className="font-bold text-slate-700">
+                          📅 Date :
+                        </span>{" "}
+                        <span className="text-slate-500">
+                          {new Date(
+                            repair.created_at
+                          ).toLocaleDateString("fr-FR")}
+                        </span>
+                      </div>
+
+                    </div>
+
+                    <Link
+                      href={
+                        "/" +
+                        locale +
+                        "/repairs/request/" +
+                        repair.id
+                      }
+                      className="mt-6 flex w-full items-center justify-center rounded-xl bg-slate-950 px-5 py-3 font-bold text-white hover:bg-blue-600"
+                    >
+                      Voir la réparation →
+                    </Link>
+
+                  </article>
+                ))}
+
+              </div>
+            )}
+
+          </section>
+        )}
+
+        {!isTechnician && (
+          <section className="mt-8">
+
+            <div className="card p-6">
+
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-bold uppercase tracking-widest text-blue-600">
+                    🔧 Mes réparations
+                  </div>
+
+                  <h2 className="mt-2 text-2xl font-black text-slate-950">
+                    Retrouvez vos demandes
+                  </h2>
+
+                  <p className="mt-2 text-slate-500">
+                    Consultez vos demandes de réparation et les techniciens intéressés.
+                  </p>
+                </div>
+
+                <div className="hidden text-4xl sm:block">
+                  🔧
+                </div>
+              </div>
+
+              <Link
+                href={"/" + locale + "/repairs"}
+                className="mt-6 inline-flex rounded-xl bg-slate-950 px-5 py-3 font-bold text-white hover:bg-blue-600"
+              >
+                Voir mes réparations →
+              </Link>
+
+            </div>
+
+          </section>
+        )}
+
+        <div className="mt-8 grid gap-6 lg:grid-cols-2">
+
+          <section className="card p-6">
+            <h2 className="text-xl font-black">
+              Activité récente
+            </h2>
+
+            <div className="py-12 text-center text-sm text-slate-400">
+              Aucune activité récente pour le moment.
+            </div>
+          </section>
+
+          <section className="card p-6">
+            <h2 className="text-xl font-black">
+              Actions rapides
+            </h2>
+
+            <div className="mt-5 grid gap-3">
+
+              {isTechnician ? (
+                <>
+                  <Link
+                    href={"/" + locale + "/repairs/requests"}
+                    className="btn btn-secondary justify-start"
+                  >
+                    🔧 Voir les demandes de réparation
+                  </Link>
+
+                  <Link
+                    href={"/" + locale + "/technicians"}
+                    className="btn btn-secondary justify-start"
+                  >
+                    👨‍🔧 Voir les techniciens
+                  </Link>
+                </>
+              ) : (
+                <>
+                  <Link
+                    href={"/" + locale + "/repairs"}
+                    className="btn btn-secondary justify-start"
+                  >
+                    🔧 Demander une réparation
+                  </Link>
+
+                  <Link
+                    href={"/" + locale + "/technicians"}
+                    className="btn btn-secondary justify-start"
+                  >
+                    👨‍🔧 Trouver un technicien
+                  </Link>
+                </>
+              )}
+
+              <Link
+                href={"/" + locale + "/shop"}
+                className="btn btn-secondary justify-start"
+              >
+                🛒 Explorer la boutique
+              </Link>
+
+            </div>
+          </section>
+
+        </div>
+
+      </div>
+    </main>
+  );
+}

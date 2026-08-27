@@ -53,8 +53,8 @@ export default function SmartphoneRepairsPage() {
             </h1>
 
             <p className="mt-5 text-lg leading-8 text-slate-300">
-              Sélectionnez le problème rencontré pour trouver rapidement
-              la solution adaptée.
+              Sélectionnez le problème rencontré pour envoyer une demande de
+              réparation.
             </p>
           </div>
         </div>
@@ -81,10 +81,12 @@ export default function SmartphoneRepairsPage() {
                 </p>
 
                 <Link
-                  href="/fr/technicians"
-                  className="mt-6 inline-flex font-bold text-blue-600 hover:text-blue-700"
+                  href={`/fr/repairs/request?device=Smartphone&problem=${encodeURIComponent(
+                    problem.title
+                  )}`}
+                  className="mt-6 inline-flex rounded-xl bg-blue-600 px-5 py-3 font-bold text-white hover:bg-blue-700"
                 >
-                  Trouver un technicien →
+                  Faire une demande →
                 </Link>
               </div>
             ))}
@@ -99,15 +101,15 @@ export default function SmartphoneRepairsPage() {
           </h2>
 
           <p className="mt-4 max-w-2xl text-blue-100">
-            Décrivez simplement la panne de votre smartphone et un technicien
-            pourra vous orienter.
+            Décrivez simplement la panne de votre smartphone et envoyez votre
+            demande à notre réseau de techniciens.
           </p>
 
           <Link
-            href="/fr/technicians"
+            href="/fr/repairs/request?device=Smartphone&problem=Autre%20probl%C3%A8me"
             className="mt-7 inline-flex rounded-xl bg-white px-6 py-3 font-black text-blue-700 hover:bg-blue-50"
           >
-            Trouver un technicien
+            Décrire mon problème
           </Link>
         </div>
       </section>
