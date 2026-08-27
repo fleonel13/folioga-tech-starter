@@ -5,6 +5,7 @@ import { use, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import RepairMessages from "@/components/repairs/RepairMessages";
 import RepairPhotos from "@/components/repairs/RepairPhotos";
+import RepairQuotes from "@/components/repairs/RepairQuotes";
 
 type RepairRequest = {
   id: string;
@@ -44,7 +45,7 @@ export default function RepairRequestDetailPage({
   const [myInterest, setMyInterest] = useState<Interest | null>(null);
 
   const [userId, setUserId] = useState<string | null>(null);
-  const [userRole, setUserRole] = useState<string>("");
+  const [userRole, setUserRole] = useState("");
 
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
@@ -88,8 +89,6 @@ export default function RepairRequestDetailPage({
       .trim();
 
     setUserRole(role);
-
-    console.log("ROLE UTILISATEUR :", role);
 
     const { data: requestData, error: requestError } = await supabase
       .from("repair_requests")
@@ -554,6 +553,10 @@ export default function RepairRequestDetailPage({
           </div>
         )}
 
+        {/* ====================================================
+            INFORMATIONS DE LA DEMANDE
+        ==================================================== */}
+
         <section className="mt-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:p-8">
 
           <div className="flex flex-col justify-between gap-4 sm:flex-row">
@@ -604,14 +607,13 @@ export default function RepairRequestDetailPage({
                   request.country,
                 ]
                   .filter(Boolean)
-                  .join(", ") ||
-                  "Non renseignée"}
+                  .join(", ") || "Non renseignée"}
               </div>
             </div>
 
             <div className="rounded-2xl bg-slate-50 p-4">
               <div className="font-bold text-slate-700">
-                💰 Budget
+                💰 Budget initial
               </div>
 
               <div className="mt-1 text-slate-500">
@@ -635,6 +637,17 @@ export default function RepairRequestDetailPage({
 
           </div>
         </section>
+
+        {/* ====================================================
+            GESTION DES DEVIS / PRIX
+        ==================================================== */}
+
+        <RepairQuotes
+          repairRequestId={request.id}
+          clientId={request.client_id}
+          userId={userId || ""}
+          userRole={userRole}
+        />
 
         {/* ====================================================
             MISSION TECHNICIEN
@@ -711,7 +724,7 @@ export default function RepairRequestDetailPage({
         />
 
         {/* ====================================================
-            PHOTOS DE LA RÉPARATION
+            PHOTOS
         ==================================================== */}
 
         <RepairPhotos
@@ -818,11 +831,13 @@ export default function RepairRequestDetailPage({
                             )
                           }
                           disabled={
-                            acceptingId === technician.id
+                            acceptingId ===
+                            technician.id
                           }
                           className="mt-5 w-full rounded-xl bg-slate-950 px-5 py-3 font-bold text-white hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
                         >
-                          {acceptingId === technician.id
+                          {acceptingId ===
+                          technician.id
                             ? "Acceptation..."
                             : "Accepter ce technicien →"}
                         </button>
