@@ -643,11 +643,16 @@ export default function RepairRequestDetailPage({
         ==================================================== */}
 
         <RepairQuotes
-          repairRequestId={request.id}
-          clientId={request.client_id}
-          userId={userId || ""}
-          userRole={userRole}
-        />
+  repairRequestId={request.id}
+  clientId={request.client_id}
+  technicianId={
+    isAcceptedTechnician && userId
+      ? userId
+      : null
+  }
+  userId={userId || ""}
+  userRole={userRole}
+/>
 
         {/* ====================================================
             MISSION TECHNICIEN
@@ -673,8 +678,7 @@ export default function RepairRequestDetailPage({
             </div>
 
             <p className="mt-4 text-slate-500">
-              Faites évoluer le statut de la mission lorsque vous commencez puis terminez la réparation.
-            </p>
+              Faites évoluer le statut de la mission lorsque vous commencez puis terminez la réparation.            </p>
 
             {request.status === "assigned" && (
               <button
