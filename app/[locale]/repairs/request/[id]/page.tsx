@@ -82,9 +82,7 @@ export default function RepairRequestDetailPage({
       console.error("Erreur profil :", profileError);
     }
 
-    const role = String(
-      profile?.role || user.user_metadata?.role || ""
-    )
+    const role = String(profile?.role || user.user_metadata?.role || "")
       .toLowerCase()
       .trim();
 
@@ -117,20 +115,16 @@ export default function RepairRequestDetailPage({
     const isClient = currentRequest.client_id === user.id;
 
     if (isClient) {
-      const { data: interests, error: interestsError } =
-        await supabase
-          .from("repair_interests")
-          .select("technician_id, status, created_at")
-          .eq("repair_request_id", id)
-          .order("created_at", { ascending: false });
+      const { data: interests, error: interestsError } = await supabase
+        .from("repair_interests")
+        .select("technician_id, status, created_at")
+        .eq("repair_request_id", id)
+        .order("created_at", { ascending: false });
 
       if (interestsError) {
         console.error("Erreur intérêts :", interestsError);
 
-        setError(
-          "Impossible de charger les techniciens intéressés."
-        );
-
+        setError("Impossible de charger les techniciens intéressés.");
         setLoading(false);
         return;
       }
@@ -153,11 +147,10 @@ export default function RepairRequestDetailPage({
         .map((interest) => interest.technician_id)
         .filter(Boolean);
 
-      const { data: profiles, error: profilesError } =
-        await supabase
-          .from("profiles")
-          .select("id, name, city, country")
-          .in("id", technicianIds);
+      const { data: profiles, error: profilesError } = await supabase
+        .from("profiles")
+        .select("id, name, city, country")
+        .in("id", technicianIds);
 
       if (profilesError) {
         console.error("Erreur profils :", profilesError);
@@ -183,27 +176,19 @@ export default function RepairRequestDetailPage({
       return;
     }
 
-    if (
-      role === "technicien" ||
-      role === "technician"
-    ) {
-      const { data: interest, error: interestError } =
-        await supabase
-          .from("repair_interests")
-          .select("technician_id, status, created_at")
-          .eq("repair_request_id", id)
-          .eq("technician_id", user.id)
-          .maybeSingle();
+    if (role === "technicien" || role === "technician") {
+      const { data: interest, error: interestError } = await supabase
+        .from("repair_interests")
+        .select("technician_id, status, created_at")
+        .eq("repair_request_id", id)
+        .eq("technician_id", user.id)
+        .maybeSingle();
 
       if (interestError) {
-        console.error(
-          "Erreur intérêt technicien :",
-          interestError
-        );
+        console.error("Erreur intérêt technicien :", interestError);
       }
 
-      const currentInterest =
-        interest as Interest | null;
+      const currentInterest = interest as Interest | null;
 
       setMyInterest(currentInterest);
 
@@ -221,9 +206,7 @@ export default function RepairRequestDetailPage({
     loadData();
   }, [id]);
 
-  async function acceptTechnician(
-    technicianId: string
-  ) {
+  async function acceptTechnician(technicianId: string) {
     if (!request) return;
 
     if (request.status !== "open") {
@@ -252,10 +235,7 @@ export default function RepairRequestDetailPage({
       .eq("technician_id", technicianId);
 
     if (interestError) {
-      console.error(
-        "Erreur acceptation technicien :",
-        interestError
-      );
+      console.error("Erreur acceptation technicien :", interestError);
 
       setError(
         "Impossible d'accepter le technicien. Vérifiez les permissions Supabase."
@@ -265,20 +245,16 @@ export default function RepairRequestDetailPage({
       return;
     }
 
-    const { error: statusError } =
-      await supabase.rpc(
-        "update_repair_status",
-        {
-          p_repair_id: request.id,
-          p_status: "assigned",
-        }
-      );
+    const { error: statusError } = await supabase.rpc(
+      "update_repair_status",
+      {
+        p_repair_id: request.id,
+        p_status: "assigned",
+      }
+    );
 
     if (statusError) {
-      console.error(
-        "Erreur changement statut :",
-        statusError
-      );
+      console.error("Erreur changement statut :", statusError);
 
       setError(
         "Le technicien a été accepté, mais le statut de la demande n'a pas pu être modifié."
@@ -312,40 +288,28 @@ export default function RepairRequestDetailPage({
       return;
     }
 
-    if (
-      userRole !== "technicien" &&
-      userRole !== "technician"
-    ) {
+    if (userRole !== "technicien" && userRole !== "technician") {
       setError(
         "Seul le technicien accepté peut modifier l'avancement de cette mission."
       );
       return;
     }
 
-    if (
-      !myInterest ||
-      myInterest.status !== "accepted"
-    ) {
+    if (!myInterest || myInterest.status !== "accepted") {
       setError(
         "Vous devez être le technicien accepté pour modifier cette mission."
       );
       return;
     }
 
-    if (
-      newStatus === "in_progress" &&
-      request.status !== "assigned"
-    ) {
+    if (newStatus === "in_progress" && request.status !== "assigned") {
       setError(
         "La réparation doit d'abord être assignée avant de commencer."
       );
       return;
     }
 
-    if (
-      newStatus === "completed" &&
-      request.status !== "in_progress"
-    ) {
+    if (newStatus === "completed" && request.status !== "in_progress") {
       setError(
         "La réparation doit être en cours avant de pouvoir être terminée."
       );
@@ -364,20 +328,16 @@ export default function RepairRequestDetailPage({
     setMessage("");
     setError("");
 
-    const { error: statusError } =
-      await supabase.rpc(
-        "update_repair_status",
-        {
-          p_repair_id: request.id,
-          p_status: newStatus,
-        }
-      );
+    const { error: statusError } = await supabase.rpc(
+      "update_repair_status",
+      {
+        p_repair_id: request.id,
+        p_status: newStatus,
+      }
+    );
 
     if (statusError) {
-      console.error(
-        "Erreur mise à jour statut :",
-        statusError
-      );
+      console.error("Erreur mise à jour statut :", statusError);
 
       setError(
         statusError.message ||
@@ -463,9 +423,7 @@ export default function RepairRequestDetailPage({
               Demande introuvable
             </h1>
 
-            <p className="mt-3 text-slate-500">
-              {error || message}
-            </p>
+            <p className="mt-3 text-slate-500">{error || message}</p>
 
             <Link
               href={"/" + locale + "/dashboard"}
@@ -479,21 +437,17 @@ export default function RepairRequestDetailPage({
     );
   }
 
-  const isClient =
-    userId === request.client_id;
+  const isClient = userId === request.client_id;
 
   const isTechnician =
-    userRole === "technicien" ||
-    userRole === "technician";
+    userRole === "technicien" || userRole === "technician";
 
   const isAcceptedTechnician =
-    isTechnician &&
-    myInterest?.status === "accepted";
+    isTechnician && myInterest?.status === "accepted";
 
   return (
     <main className="min-h-screen bg-slate-50 py-12">
       <div className="page-container">
-
         <Link
           href={"/" + locale + "/dashboard"}
           className="font-bold text-blue-600 hover:text-blue-700"
@@ -514,9 +468,7 @@ export default function RepairRequestDetailPage({
         )}
 
         <section className="mt-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:p-8">
-
           <div className="flex flex-col justify-between gap-4 sm:flex-row">
-
             <div>
               <div className="text-sm font-bold text-blue-600">
                 {request.device_type || "Appareil"}
@@ -535,7 +487,6 @@ export default function RepairRequestDetailPage({
             >
               {getStatusLabel(request.status)}
             </span>
-
           </div>
 
           {request.description && (
@@ -551,17 +502,13 @@ export default function RepairRequestDetailPage({
           )}
 
           <div className="mt-6 grid gap-4 border-t border-slate-100 pt-6 sm:grid-cols-3">
-
             <div className="rounded-2xl bg-slate-50 p-4">
               <div className="font-bold text-slate-700">
                 📍 Localisation
               </div>
 
               <div className="mt-1 text-slate-500">
-                {[
-                  request.city,
-                  request.country,
-                ]
+                {[request.city, request.country]
                   .filter(Boolean)
                   .join(", ") || "Non renseignée"}
               </div>
@@ -580,17 +527,12 @@ export default function RepairRequestDetailPage({
             </div>
 
             <div className="rounded-2xl bg-slate-50 p-4">
-              <div className="font-bold text-slate-700">
-                📅 Date
-              </div>
+              <div className="font-bold text-slate-700">📅 Date</div>
 
               <div className="mt-1 text-slate-500">
-                {new Date(
-                  request.created_at
-                ).toLocaleDateString("fr-FR")}
+                {new Date(request.created_at).toLocaleDateString("fr-FR")}
               </div>
             </div>
-
           </div>
         </section>
 
@@ -598,9 +540,7 @@ export default function RepairRequestDetailPage({
           repairRequestId={request.id}
           clientId={request.client_id}
           technicianId={
-            isAcceptedTechnician && userId
-              ? userId
-              : null
+            isAcceptedTechnician && userId ? userId : null
           }
           userId={userId || ""}
           userRole={userRole}
@@ -608,11 +548,8 @@ export default function RepairRequestDetailPage({
 
         {isAcceptedTechnician && (
           <section className="mt-8 rounded-3xl border border-blue-200 bg-white p-6 shadow-sm md:p-8">
-
             <div className="flex items-center gap-3">
-              <div className="text-3xl">
-                🔧
-              </div>
+              <div className="text-3xl">🔧</div>
 
               <div>
                 <div className="text-sm font-bold uppercase tracking-wider text-blue-600">
@@ -626,15 +563,14 @@ export default function RepairRequestDetailPage({
             </div>
 
             <p className="mt-4 text-slate-500">
-              Faites évoluer le statut de la mission lorsque vous commencez puis terminez la réparation.
+              Faites évoluer le statut de la mission lorsque vous commencez
+              puis terminez la réparation.
             </p>
 
             {request.status === "assigned" && (
               <button
                 type="button"
-                onClick={() =>
-                  updateRepairStatus("in_progress")
-                }
+                onClick={() => updateRepairStatus("in_progress")}
                 disabled={updatingStatus}
                 className="mt-6 w-full rounded-xl bg-blue-600 px-5 py-3 font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
@@ -647,9 +583,7 @@ export default function RepairRequestDetailPage({
             {request.status === "in_progress" && (
               <button
                 type="button"
-                onClick={() =>
-                  updateRepairStatus("completed")
-                }
+                onClick={() => updateRepairStatus("completed")}
                 disabled={updatingStatus}
                 className="mt-6 w-full rounded-xl bg-emerald-600 px-5 py-3 font-bold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
@@ -664,21 +598,15 @@ export default function RepairRequestDetailPage({
                 ✅ Cette réparation est terminée.
               </div>
             )}
-
           </section>
         )}
 
-        <RepairMessages
-          repairRequestId={request.id}
-        />
+        <RepairMessages repairRequestId={request.id} />
 
-        <RepairPhotos
-          repairRequestId={request.id}
-        />
+        <RepairPhotos repairRequestId={request.id} />
 
         {isClient && (
           <section className="mt-8">
-
             <h2 className="text-2xl font-black text-slate-950">
               👨‍🔧 Techniciens intéressés
             </h2>
@@ -689,10 +617,7 @@ export default function RepairRequestDetailPage({
 
             {technicians.length === 0 ? (
               <div className="mt-6 rounded-3xl border border-slate-200 bg-white p-10 text-center">
-
-                <div className="text-5xl">
-                  👨‍🔧
-                </div>
+                <div className="text-5xl">👨‍🔧</div>
 
                 <h3 className="mt-4 text-xl font-black text-slate-950">
                   Aucun technicien pour le moment
@@ -701,122 +626,92 @@ export default function RepairRequestDetailPage({
                 <p className="mt-2 text-slate-500">
                   Les techniciens intéressés apparaîtront ici.
                 </p>
-
               </div>
             ) : (
               <div className="mt-6 grid gap-5 md:grid-cols-2">
-
-                {technicians.map(
-                  (technician) => (
-                    <article
-                      key={technician.id}
-                      className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"
-                    >
-
-                      <div className="flex items-center gap-4">
-
-                        <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50 text-2xl">
-                          🔧
-                        </div>
-
-                        <div>
-                          <h3 className="text-xl font-black text-slate-950">
-                            {technician.name ||
-                              "Technicien Folioga-Tech"}
-                          </h3>
-
-                          <p className="text-sm font-bold text-blue-600">
-                            Technicien
-                          </p>
-                        </div>
-
+                {technicians.map((technician) => (
+                  <article
+                    key={technician.id}
+                    className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50 text-2xl">
+                        🔧
                       </div>
 
-                      {(technician.city ||
-                        technician.country) && (
-                        <p className="mt-5 text-sm text-slate-500">
-                          📍{" "}
-                          {[
-                            technician.city,
-                            technician.country,
-                          ]
-                            .filter(Boolean)
-                            .join(", ")}
+                      <div>
+                        <h3 className="text-xl font-black text-slate-950">
+                          {technician.name || "Technicien Folioga-Tech"}
+                        </h3>
+
+                        <p className="text-sm font-bold text-blue-600">
+                          Technicien
                         </p>
-                      )}
+                      </div>
+                    </div>
 
-                      {request.status === "assigned" && (
-                        <div className="mt-5 rounded-xl bg-orange-50 px-5 py-3 text-center font-bold text-orange-700">
-                          🟠 Technicien accepté
-                        </div>
-                      )}
+                    {(technician.city || technician.country) && (
+                      <p className="mt-5 text-sm text-slate-500">
+                        📍{" "}
+                        {[technician.city, technician.country]
+                          .filter(Boolean)
+                          .join(", ")}
+                      </p>
+                    )}
 
-                      {request.status === "in_progress" && (
-                        <div className="mt-5 rounded-xl bg-blue-50 px-5 py-3 text-center font-bold text-blue-700">
-                          🔵 Réparation en cours
-                        </div>
-                      )}
+                    {request.status === "assigned" && (
+                      <div className="mt-5 rounded-xl bg-orange-50 px-5 py-3 text-center font-bold text-orange-700">
+                        🟠 Technicien accepté
+                      </div>
+                    )}
 
-                      {request.status === "completed" && (
-                        <div className="mt-5 rounded-xl bg-emerald-50 px-5 py-3 text-center font-bold text-emerald-700">
-                          ✅ Réparation terminée
-                        </div>
-                      )}
+                    {request.status === "in_progress" && (
+                      <div className="mt-5 rounded-xl bg-blue-50 px-5 py-3 text-center font-bold text-blue-700">
+                        🔵 Réparation en cours
+                      </div>
+                    )}
 
-                      {request.status === "open" && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            acceptTechnician(
-                              technician.id
-                            )
-                          }
-                          disabled={
-                            acceptingId ===
-                            technician.id
-                          }
-                          className="mt-5 w-full rounded-xl bg-slate-950 px-5 py-3 font-bold text-white hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          {acceptingId ===
-                          technician.id
-                            ? "Acceptation..."
-                            : "Accepter ce technicien →"}
-                        </button>
-                      )}
+                    {request.status === "completed" && (
+                      <div className="mt-5 rounded-xl bg-emerald-50 px-5 py-3 text-center font-bold text-emerald-700">
+                        ✅ Réparation terminée
+                      </div>
+                    )}
 
-                    </article>
-                  )
-                )}
-
+                    {request.status === "open" && (
+                      <button
+                        type="button"
+                        onClick={() => acceptTechnician(technician.id)}
+                        disabled={acceptingId === technician.id}
+                        className="mt-5 w-full rounded-xl bg-slate-950 px-5 py-3 font-bold text-white hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {acceptingId === technician.id
+                          ? "Acceptation..."
+                          : "Accepter ce technicien →"}
+                      </button>
+                    )}
+                  </article>
+                ))}
               </div>
             )}
-
           </section>
         )}
 
-        {isTechnician &&
-          !isAcceptedTechnician && (
-            <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+        {isTechnician && !isAcceptedTechnician && (
+          <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="rounded-2xl bg-slate-50 p-6 text-center">
+              <div className="text-4xl">⏳</div>
 
-              <div className="rounded-2xl bg-slate-50 p-6 text-center">
+              <h2 className="mt-4 text-xl font-black text-slate-950">
+                En attente d'acceptation
+              </h2>
 
-                <div className="text-4xl">
-                  ⏳
-                </div>
-
-                <h2 className="mt-4 text-xl font-black text-slate-950">
-                  En attente d'acceptation
-                </h2>
-
-                <p className="mx-auto mt-2 max-w-xl text-sm text-slate-500">
-                  Vous avez manifesté votre intérêt pour cette réparation. Le client doit maintenant accepter votre candidature.
-                </p>
-
-              </div>
-
-            </section>
-          )}
-
+              <p className="mx-auto mt-2 max-w-xl text-sm text-slate-500">
+                Vous avez manifesté votre intérêt pour cette réparation. Le
+                client doit maintenant accepter votre candidature.
+              </p>
+            </div>
+          </section>
+        )}
       </div>
     </main>
   );
