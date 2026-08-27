@@ -116,12 +116,6 @@ export default function RepairRequestDetailPage({
 
     const isClient = currentRequest.client_id === user.id;
 
-    /*
-     * ============================================================
-     * CLIENT
-     * ============================================================
-     */
-
     if (isClient) {
       const { data: interests, error: interestsError } =
         await supabase
@@ -189,12 +183,6 @@ export default function RepairRequestDetailPage({
       return;
     }
 
-    /*
-     * ============================================================
-     * TECHNICIEN
-     * ============================================================
-     */
-
     if (
       role === "technicien" ||
       role === "technician"
@@ -232,12 +220,6 @@ export default function RepairRequestDetailPage({
   useEffect(() => {
     loadData();
   }, [id]);
-
-  /*
-   * ============================================================
-   * CLIENT : ACCEPTER UN TECHNICIEN
-   * ============================================================
-   */
 
   async function acceptTechnician(
     technicianId: string
@@ -319,12 +301,6 @@ export default function RepairRequestDetailPage({
 
     await loadData();
   }
-
-  /*
-   * ============================================================
-   * TECHNICIEN : CHANGER LE STATUT
-   * ============================================================
-   */
 
   async function updateRepairStatus(
     newStatus: "in_progress" | "completed"
@@ -428,49 +404,35 @@ export default function RepairRequestDetailPage({
     await loadData();
   }
 
-  function getStatusLabel(
-    status: string | null
-  ) {
+  function getStatusLabel(status: string | null) {
     switch (status) {
       case "open":
         return "🟢 Ouverte";
-
       case "assigned":
         return "🟠 Technicien assigné";
-
       case "in_progress":
         return "🔵 Réparation en cours";
-
       case "completed":
         return "✅ Réparation terminée";
-
       case "cancelled":
         return "🔴 Annulée";
-
       default:
         return status || "Inconnue";
     }
   }
 
-  function getStatusClass(
-    status: string | null
-  ) {
+  function getStatusClass(status: string | null) {
     switch (status) {
       case "open":
         return "bg-green-50 text-green-700";
-
       case "assigned":
         return "bg-orange-50 text-orange-700";
-
       case "in_progress":
         return "bg-blue-50 text-blue-700";
-
       case "completed":
         return "bg-emerald-50 text-emerald-700";
-
       case "cancelled":
         return "bg-red-50 text-red-700";
-
       default:
         return "bg-slate-100 text-slate-700";
     }
@@ -495,9 +457,7 @@ export default function RepairRequestDetailPage({
       <main className="min-h-screen bg-slate-50 py-12">
         <div className="page-container">
           <div className="rounded-3xl border border-slate-200 bg-white p-10 text-center">
-            <div className="text-5xl">
-              🔧
-            </div>
+            <div className="text-5xl">🔧</div>
 
             <h1 className="mt-5 text-2xl font-black text-slate-950">
               Demande introuvable
@@ -552,10 +512,6 @@ export default function RepairRequestDetailPage({
             {message}
           </div>
         )}
-
-        {/* ====================================================
-            INFORMATIONS DE LA DEMANDE
-        ==================================================== */}
 
         <section className="mt-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:p-8">
 
@@ -638,25 +594,17 @@ export default function RepairRequestDetailPage({
           </div>
         </section>
 
-        {/* ====================================================
-            GESTION DES DEVIS / PRIX
-        ==================================================== */}
-
         <RepairQuotes
-  repairRequestId={request.id}
-  clientId={request.client_id}
-  technicianId={
-    isAcceptedTechnician && userId
-      ? userId
-      : null
-  }
-  userId={userId || ""}
-  userRole={userRole}
-/>
-
-        {/* ====================================================
-            MISSION TECHNICIEN
-        ==================================================== */}
+          repairRequestId={request.id}
+          clientId={request.client_id}
+          technicianId={
+            isAcceptedTechnician && userId
+              ? userId
+              : null
+          }
+          userId={userId || ""}
+          userRole={userRole}
+        />
 
         {isAcceptedTechnician && (
           <section className="mt-8 rounded-3xl border border-blue-200 bg-white p-6 shadow-sm md:p-8">
@@ -678,7 +626,8 @@ export default function RepairRequestDetailPage({
             </div>
 
             <p className="mt-4 text-slate-500">
-              Faites évoluer le statut de la mission lorsque vous commencez puis terminez la réparation.            </p>
+              Faites évoluer le statut de la mission lorsque vous commencez puis terminez la réparation.
+            </p>
 
             {request.status === "assigned" && (
               <button
@@ -719,25 +668,13 @@ export default function RepairRequestDetailPage({
           </section>
         )}
 
-        {/* ====================================================
-            MESSAGERIE
-        ==================================================== */}
-
         <RepairMessages
           repairRequestId={request.id}
         />
 
-        {/* ====================================================
-            PHOTOS
-        ==================================================== */}
-
         <RepairPhotos
           repairRequestId={request.id}
         />
-
-        {/* ====================================================
-            CLIENT : TECHNICIENS
-        ==================================================== */}
 
         {isClient && (
           <section className="mt-8">
@@ -856,10 +793,6 @@ export default function RepairRequestDetailPage({
 
           </section>
         )}
-
-        {/* ====================================================
-            TECHNICIEN NON ACCEPTÉ
-        ==================================================== */}
 
         {isTechnician &&
           !isAcceptedTechnician && (
