@@ -1,51 +1,65 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { supabase } from "@/lib/supabase";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ChangeEvent,
+} from "react";
 
 type QuoteStatus =
   | "draft"
   | "sent"
-  | "viewed"
-  | "negotiating"
   | "accepted"
   | "rejected"
   | "expired"
-  | "cancelled"
-  | "superseded";
+  | "cancelled";
 
 type QuoteItem = {
   id: string;
-  quote_id: string;
   description: string;
-  item_type: string;
   quantity: number;
-  unit_price: number;
-  total_price: number;
-  position: number;
+  unitPrice: number;
+};
+
+type Attachment = {
+  id: string;
+  name: string;
+  size: number;
+  type: string;
+};
+
+type QuoteVersion = {
+  id: string;
+  version: number;
+  createdAt: string;
+  items: QuoteItem[];
+  currency: string;
+  vatRate: number;
+  discountType: "percent" | "fixed";
+  discountValue: number;
+  notes: string;
 };
 
 type Quote = {
   id: string;
-  repair_request_id: string;
-  technician_id: string;
+  number: string;
   version: number;
   status: QuoteStatus;
+  createdAt: string;
+  validUntil: string;
   currency: string;
-  subtotal: number;
-  discount_type: string | null;
-  discount_value: number;
-  discount_amount: number;
-  tax_rate: number;
-  tax_amount: number;
-  total_ht: number;
-  total_ttc: number;
-  notes: string | null;
-  expires_at: string | null;
-  accepted_at: string | null;
-  rejected_at: string | null;
-  created_at: string;
-  updated_at: string;
+  vatRate: number;
+  items: QuoteItem[];
+  discountType: "percent" | "fixed";
+  discountValue: number;
+  notes: string;
+  clientId: string;
+  technicianId: string | null;
+  attachments: Attachment[];
+  photos: Attachment[];
+  versions: QuoteVersion[];
 };
 
 type RepairQuotesProps = {
@@ -56,1132 +70,1670 @@ type RepairQuotesProps = {
   userRole: string;
 };
 
-type DraftItem = {
-  description: string;
-  item_type: string;
-  quantity: number;
-  unit_price: number;
-};
+const STORAGE_PREFIX = "folioga-repair-quotes-";
+const COMMISSION_RATE = 0.1;
 
-const emptyItem = (): DraftItem => ({
-  description: "",
-  item_type: "labor",
-  quantity: 1,
-  unit_price: 0,
-});
-
-function money(value: number, currency = "EUR") {
-  return new Intl.NumberFormat("fr-FR", {
-    style: "currency",
-    currency,
-  }).format(Number(value) || 0);
+function makeId() {
+  return Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
-function statusLabel(status: QuoteStatus) {
-  switch (status) {
-    case "draft":
-      return "📝 Brouillon";
-    case "sent":
-      return "📤 Envoyé";
-    case "viewed":
-      return "👀 Vu";
-    case "negotiating":
-      return "💬 En négociation";
-    case "accepted":
-      return "✅ Accepté";
-    case "rejected":
-      return "❌ Refusé";
-    case "expired":
-      return "⏰ Expiré";
-    case "cancelled":
-      return "🚫 Annulé";
-    case "superseded":
-      return "🔄 Remplacé";
-    default:
-      return status;
+function todayISO() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function addDays(days: number) {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function money(value: number, currency: string) {
+  try {
+    return new Intl.NumberFormat("fr-FR", {
+      style: "currency",
+      currency,
+    }).format(value);
+  } catch {
+    return `${value.toFixed(2)} ${currency}`;
   }
 }
 
-function statusClass(status: QuoteStatus) {
-  switch (status) {
-    case "accepted":
-      return "bg-emerald-50 text-emerald-700";
+function csvEscape(value: string | number) {
+  return `"${String(value).replaceAll('"', '""')}"`;
+}
 
-    case "rejected":
-    case "cancelled":
-    case "expired":
-      return "bg-red-50 text-red-700";
+function createEmptyItem(): QuoteItem {
+  return {
+    id: makeId(),
+    description: "",
+    quantity: 1,
+    unitPrice: 0,
+  };
+}
 
-    case "sent":
-    case "viewed":
-      return "bg-blue-50 text-blue-700";
-
-    case "negotiating":
-      return "bg-orange-50 text-orange-700";
-
-    default:
-      return "bg-slate-100 text-slate-700";
-  }
+function createEmptyQuote(
+  clientId: string,
+  technicianId: string | null,
+  number: string
+): Quote {
+  return {
+    id: makeId(),
+    number,
+    version: 1,
+    status: "draft",
+    createdAt: new Date().toISOString(),
+    validUntil: addDays(30),
+    currency: "EUR",
+    vatRate: 20,
+    items: [createEmptyItem()],
+    discountType: "percent",
+    discountValue: 0,
+    notes: "",
+    clientId,
+    technicianId,
+    attachments: [],
+    photos: [],
+    versions: [],
+  };
 }
 
 export default function RepairQuotes({
   repairRequestId,
   clientId,
-  technicianId,
+  technicianId = null,
   userId,
   userRole,
 }: RepairQuotesProps) {
+  const isTechnician =
+    userRole === "technicien" || userRole === "technician";
+
   const isClient = userId === clientId;
 
-  const hasTechnicianRole =
-    userRole === "technicien" ||
-    userRole === "technician";
-
-  /*
-   * Le technicien peut créer un devis uniquement si :
-   * - il a le rôle technicien
-   * - un technicien est assigné à la réparation
-   * - l'utilisateur connecté est ce technicien
-   */
-  const isAssignedTechnician =
-    hasTechnicianRole &&
-    !!technicianId &&
-    technicianId === userId;
+  const storageKey = `${STORAGE_PREFIX}${repairRequestId}`;
 
   const [quotes, setQuotes] = useState<Quote[]>([]);
-  const [items, setItems] = useState<Record<string, QuoteItem[]>>({});
+  const [selectedQuoteId, setSelectedQuoteId] = useState<string | null>(null);
 
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [processingId, setProcessingId] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | QuoteStatus>("all");
+  const [periodFilter, setPeriodFilter] = useState<"all" | "30" | "90">("all");
 
-  const [showBuilder, setShowBuilder] = useState(false);
+  const [currency, setCurrency] = useState("EUR");
+  const [vatRate, setVatRate] = useState(20);
 
-  const [draftItems, setDraftItems] = useState<DraftItem[]>([
-    emptyItem(),
-  ]);
-
-  const [discountType, setDiscountType] = useState<
-    "none" | "fixed" | "percent"
-  >("none");
+  const [discountType, setDiscountType] =
+    useState<"percent" | "fixed">("percent");
 
   const [discountValue, setDiscountValue] = useState(0);
-  const [taxRate, setTaxRate] = useState(0);
+
   const [notes, setNotes] = useState("");
-  const [expiresAt, setExpiresAt] = useState("");
 
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
+  const [showStats, setShowStats] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [showDiscussion, setShowDiscussion] = useState(false);
 
-  const activeQuote = useMemo(
-    () =>
-      quotes.find(
-        (quote) =>
-          quote.status !== "superseded" &&
-          quote.status !== "cancelled"
-      ) || null,
-    [quotes]
+  const [discussionMessage, setDiscussionMessage] = useState("");
+  const [discussion, setDiscussion] = useState<string[]>([]);
+
+  const [notification, setNotification] = useState("");
+
+  const [saving, setSaving] = useState(false);
+
+  const selectedQuote = useMemo(
+    () => quotes.find((quote) => quote.id === selectedQuoteId) || null,
+    [quotes, selectedQuoteId]
   );
 
-  const draftSubtotal = useMemo(
+  const items = selectedQuote?.items || [];
+
+  const subtotal = useMemo(
     () =>
-      draftItems.reduce(
-        (sum, item) =>
-          sum +
-          (Number(item.quantity) || 0) *
-            (Number(item.unit_price) || 0),
+      items.reduce(
+        (total, item) =>
+          total +
+          Math.max(0, Number(item.quantity) || 0) *
+            Math.max(0, Number(item.unitPrice) || 0),
         0
       ),
-    [draftItems]
+    [items]
   );
 
-  const draftDiscount = useMemo(() => {
-    if (discountType === "fixed") {
+  const discountAmount = useMemo(() => {
+    if (!selectedQuote) return 0;
+
+    if (selectedQuote.discountType === "fixed") {
       return Math.min(
-        Math.max(0, Number(discountValue) || 0),
-        draftSubtotal
-      );
-    }
-
-    if (discountType === "percent") {
-      return Math.min(
-        draftSubtotal,
-        draftSubtotal *
-          (Math.max(0, Number(discountValue) || 0) / 100)
-      );
-    }
-
-    return 0;
-  }, [discountType, discountValue, draftSubtotal]);
-
-  const draftHt = Math.max(
-    0,
-    draftSubtotal - draftDiscount
-  );
-
-  const draftTax =
-    draftHt *
-    (Math.max(0, Number(taxRate) || 0) / 100);
-
-  const draftTtc = draftHt + draftTax;
-
-  const loadQuotes = useCallback(async () => {
-    setLoading(true);
-    setError("");
-
-    const { data, error: quoteError } = await supabase
-      .from("repair_quotes")
-      .select(`
-        id,
-        repair_request_id,
-        technician_id,
-        version,
-        status,
-        currency,
         subtotal,
-        discount_type,
-        discount_value,
-        discount_amount,
-        tax_rate,
-        tax_amount,
-        total_ht,
-        total_ttc,
-        notes,
-        expires_at,
-        accepted_at,
-        rejected_at,
-        created_at,
-        updated_at
-      `)
-      .eq("repair_request_id", repairRequestId)
-      .order("version", { ascending: false });
-
-    if (quoteError) {
-      console.error(
-        "Erreur chargement devis :",
-        quoteError
+        Math.max(0, Number(selectedQuote.discountValue) || 0)
       );
-
-      setError(
-        `Impossible de charger les devis : ${quoteError.message}`
-      );
-
-      setQuotes([]);
-      setLoading(false);
-      return;
     }
 
-    const quoteList = (data || []) as Quote[];
+    return Math.min(
+      subtotal,
+      subtotal *
+        (Math.max(0, Number(selectedQuote.discountValue) || 0) / 100)
+    );
+  }, [selectedQuote, subtotal]);
 
-    setQuotes(quoteList);
+  const totalHT = Math.max(0, subtotal - discountAmount);
 
-    if (quoteList.length > 0) {
-      const quoteIds = quoteList.map(
-        (quote) => quote.id
-      );
+  const vatAmount = totalHT * (vatRate / 100);
 
-      const { data: itemData, error: itemError } =
-        await supabase
-          .from("repair_quote_items")
-          .select(`
-            id,
-            quote_id,
-            description,
-            item_type,
-            quantity,
-            unit_price,
-            total_price,
-            position
-          `)
-          .in("quote_id", quoteIds)
-          .order("position", {
-            ascending: true,
-          });
+  const totalTTC = totalHT + vatAmount;
 
-      if (itemError) {
-        console.error(
-          "Erreur chargement lignes devis :",
-          itemError
-        );
-      } else {
-        const grouped: Record<
-          string,
-          QuoteItem[]
-        > = {};
+  const commission = totalTTC * COMMISSION_RATE;
 
-        for (const item of (itemData ||
-          []) as QuoteItem[]) {
-          if (!grouped[item.quote_id]) {
-            grouped[item.quote_id] = [];
-          }
+  const technicianRevenue = Math.max(0, totalTTC - commission);
 
-          grouped[item.quote_id].push(item);
-        }
+  const isLocked =
+    selectedQuote?.status === "accepted" ||
+    selectedQuote?.status === "rejected";
 
-        setItems(grouped);
+  const isExpired =
+    selectedQuote &&
+    selectedQuote.status !== "accepted" &&
+    selectedQuote.status !== "rejected" &&
+    selectedQuote.status !== "cancelled" &&
+    new Date(selectedQuote.validUntil).getTime() <
+      new Date().setHours(0, 0, 0, 0);
+
+  const notify = useCallback((message: string) => {
+    setNotification(message);
+
+    window.setTimeout(() => {
+      setNotification("");
+    }, 3500);
+  }, []);
+
+  const persist = useCallback(
+    (nextQuotes: Quote[]) => {
+      setQuotes(nextQuotes);
+
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(nextQuotes));
+      } catch (error) {
+        console.error("Impossible de sauvegarder les devis :", error);
       }
-    } else {
-      setItems({});
-    }
-
-    setLoading(false);
-  }, [repairRequestId]);
+    },
+    [storageKey]
+  );
 
   useEffect(() => {
-    loadQuotes();
-  }, [loadQuotes]);
-
-  function updateDraftItem(
-    index: number,
-    field: keyof DraftItem,
-    value: string
-  ) {
-    setDraftItems((current) =>
-      current.map((item, itemIndex) => {
-        if (itemIndex !== index) {
-          return item;
-        }
-
-        if (
-          field === "description" ||
-          field === "item_type"
-        ) {
-          return {
-            ...item,
-            [field]: value,
-          };
-        }
-
-        return {
-          ...item,
-          [field]: Number(value) || 0,
-        };
-      })
-    );
-  }
-
-  function addDraftItem() {
-    setDraftItems((current) => [
-      ...current,
-      emptyItem(),
-    ]);
-  }
-
-  function removeDraftItem(index: number) {
-    setDraftItems((current) =>
-      current.length === 1
-        ? current
-        : current.filter(
-            (_, itemIndex) =>
-              itemIndex !== index
-          )
-    );
-  }
-
-  async function createQuote() {
-    if (!isAssignedTechnician || !technicianId) {
-      setError(
-        "Seul le technicien accepté pour cette réparation peut créer un devis."
-      );
-      return;
-    }
-
-    const validItems = draftItems.filter(
-      (item) =>
-        item.description.trim() &&
-        Number(item.quantity) > 0 &&
-        Number(item.unit_price) >= 0
-    );
-
-    if (validItems.length === 0) {
-      setError(
-        "Ajoutez au moins une ligne valide au devis."
-      );
-      return;
-    }
-
-    setSaving(true);
-    setError("");
-    setMessage("");
-
     try {
-      const nextVersion =
-        quotes.length > 0
-          ? Math.max(
-              ...quotes.map(
-                (quote) => quote.version
-              )
-            ) + 1
-          : 1;
+      const raw = localStorage.getItem(storageKey);
 
-      const { data: quote, error: quoteError } =
-        await supabase
-          .from("repair_quotes")
-          .insert({
-            repair_request_id:
-              repairRequestId,
-            technician_id: technicianId,
-            version: nextVersion,
-            status: "draft",
-            currency: "EUR",
-            subtotal: draftSubtotal,
-            discount_type:
-              discountType === "none"
-                ? null
-                : discountType,
-            discount_value:
-              discountType === "none"
-                ? 0
-                : Number(discountValue) || 0,
-            discount_amount: draftDiscount,
-            tax_rate:
-              Number(taxRate) || 0,
-            tax_amount: draftTax,
-            total_ht: draftHt,
-            total_ttc: draftTtc,
-            notes:
-              notes.trim() || null,
-            expires_at: expiresAt
-              ? new Date(
-                  `${expiresAt}T23:59:59`
-                ).toISOString()
-              : null,
-          })
-          .select()
-          .single();
+      if (raw) {
+        const parsed = JSON.parse(raw) as Quote[];
 
-      if (quoteError || !quote) {
-        throw new Error(
-          quoteError?.message ||
-            "Impossible de créer le devis."
-        );
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setQuotes(parsed);
+          setSelectedQuoteId(parsed[0].id);
+          return;
+        }
       }
-
-      const { error: itemsError } =
-        await supabase
-          .from("repair_quote_items")
-          .insert(
-            validItems.map(
-              (item, index) => ({
-                quote_id: quote.id,
-                description:
-                  item.description.trim(),
-                item_type:
-                  item.item_type,
-                quantity:
-                  Number(item.quantity),
-                unit_price:
-                  Number(item.unit_price),
-                total_price:
-                  Number(item.quantity) *
-                  Number(item.unit_price),
-                position: index,
-              })
-            )
-          );
-
-      if (itemsError) {
-        await supabase
-          .from("repair_quotes")
-          .delete()
-          .eq("id", quote.id);
-
-        throw new Error(
-          `Impossible d'enregistrer les lignes : ${itemsError.message}`
-        );
-      }
-
-      setMessage(
-        `Devis version ${nextVersion} créé avec succès.`
-      );
-
-      setShowBuilder(false);
-      setDraftItems([emptyItem()]);
-      setDiscountType("none");
-      setDiscountValue(0);
-      setTaxRate(0);
-      setNotes("");
-      setExpiresAt("");
-
-      await loadQuotes();
-    } catch (createError) {
-      console.error(
-        "Erreur création devis :",
-        createError
-      );
-
-      setError(
-        createError instanceof Error
-          ? createError.message
-          : "Impossible de créer le devis."
-      );
-    } finally {
-      setSaving(false);
+    } catch (error) {
+      console.error("Erreur chargement brouillon :", error);
     }
+
+    const quote = createEmptyQuote(
+      clientId,
+      technicianId,
+      `FT-${new Date().getFullYear()}-001`
+    );
+
+    setQuotes([quote]);
+    setSelectedQuoteId(quote.id);
+  }, [clientId, technicianId, storageKey]);
+
+  useEffect(() => {
+    if (!quotes.length) return;
+
+    const timer = window.setTimeout(() => {
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(quotes));
+      } catch (error) {
+        console.error(error);
+      }
+    }, 500);
+
+    return () => window.clearTimeout(timer);
+  }, [quotes, storageKey]);
+
+  useEffect(() => {
+    if (!selectedQuote) return;
+
+    setCurrency(selectedQuote.currency);
+    setVatRate(selectedQuote.vatRate);
+    setDiscountType(selectedQuote.discountType);
+    setDiscountValue(selectedQuote.discountValue);
+    setNotes(selectedQuote.notes);
+  }, [selectedQuoteId]);
+
+  useEffect(() => {
+    if (!selectedQuote || selectedQuote.status === "accepted") return;
+
+    if (isExpired && selectedQuote.status !== "expired") {
+      const updated = quotes.map((quote) =>
+        quote.id === selectedQuote.id
+          ? {
+              ...quote,
+              status: "expired" as QuoteStatus,
+            }
+          : quote
+      );
+
+      persist(updated);
+      notify("Le devis a expiré automatiquement.");
+    }
+  }, [isExpired, notify, persist, quotes, selectedQuote]);
+
+  const filteredQuotes = useMemo(() => {
+    return quotes.filter((quote) => {
+      const matchesSearch =
+        !search ||
+        quote.number.toLowerCase().includes(search.toLowerCase()) ||
+        quote.notes.toLowerCase().includes(search.toLowerCase());
+
+      const matchesStatus =
+        statusFilter === "all" || quote.status === statusFilter;
+
+      let matchesPeriod = true;
+
+      if (periodFilter !== "all") {
+        const days = Number(periodFilter);
+        const limit = Date.now() - days * 24 * 60 * 60 * 1000;
+
+        matchesPeriod = new Date(quote.createdAt).getTime() >= limit;
+      }
+
+      return matchesSearch && matchesStatus && matchesPeriod;
+    });
+  }, [periodFilter, quotes, search, statusFilter]);
+
+  const stats = useMemo(() => {
+    const accepted = quotes.filter(
+      (quote) => quote.status === "accepted"
+    ).length;
+
+    const sent = quotes.filter(
+      (quote) => quote.status === "sent"
+    ).length;
+
+    const draft = quotes.filter(
+      (quote) => quote.status === "draft"
+    ).length;
+
+    const expired = quotes.filter(
+      (quote) => quote.status === "expired"
+    ).length;
+
+    return {
+      total: quotes.length,
+      accepted,
+      sent,
+      draft,
+      expired,
+      conversion:
+        quotes.length > 0
+          ? Math.round((accepted / quotes.length) * 100)
+          : 0,
+    };
+  }, [quotes]);
+
+  function updateSelectedQuote(patch: Partial<Quote>) {
+    if (!selectedQuote || isLocked) return;
+
+    const updated = quotes.map((quote) =>
+      quote.id === selectedQuote.id
+        ? {
+            ...quote,
+            ...patch,
+          }
+        : quote
+    );
+
+    persist(updated);
   }
 
-  async function changeQuoteStatus(
-    quote: Quote,
-    newStatus:
-      | "sent"
-      | "accepted"
-      | "rejected"
+  function updateItem(
+    itemId: string,
+    patch: Partial<QuoteItem>
   ) {
-    setProcessingId(quote.id);
-    setError("");
-    setMessage("");
+    if (!selectedQuote || isLocked) return;
 
-    const updates: Record<string, unknown> = {
-      status: newStatus,
+    const nextItems = selectedQuote.items.map((item) =>
+      item.id === itemId
+        ? {
+            ...item,
+            ...patch,
+          }
+        : item
+    );
+
+    updateSelectedQuote({
+      items: nextItems,
+    });
+  }
+
+  function addItem() {
+    if (!selectedQuote || isLocked) return;
+
+    updateSelectedQuote({
+      items: [...selectedQuote.items, createEmptyItem()],
+    });
+  }
+
+  function removeItem(itemId: string) {
+    if (!selectedQuote || isLocked) return;
+
+    if (selectedQuote.items.length <= 1) {
+      notify("Un devis doit conserver au moins une ligne.");
+      return;
+    }
+
+    updateSelectedQuote({
+      items: selectedQuote.items.filter(
+        (item) => item.id !== itemId
+      ),
+    });
+  }
+
+  function applySettings() {
+    if (!selectedQuote || isLocked) return;
+
+    updateSelectedQuote({
+      currency,
+      vatRate,
+      discountType,
+      discountValue,
+      notes,
+    });
+
+    notify("Brouillon sauvegardé automatiquement.");
+  }
+
+  function createQuote() {
+    const number = `FT-${new Date().getFullYear()}-${String(
+      quotes.length + 1
+    ).padStart(3, "0")}`;
+
+    const quote = createEmptyQuote(
+      clientId,
+      technicianId,
+      number
+    );
+
+    const next = [...quotes, quote];
+
+    persist(next);
+    setSelectedQuoteId(quote.id);
+
+    notify("Nouveau devis créé.");
+  }
+
+  function duplicateQuote() {
+    if (!selectedQuote) return;
+
+    const duplicated: Quote = {
+      ...selectedQuote,
+      id: makeId(),
+      number: `FT-${new Date().getFullYear()}-${String(
+        quotes.length + 1
+      ).padStart(3, "0")}`,
+      version: 1,
+      status: "draft",
+      createdAt: new Date().toISOString(),
+      validUntil: addDays(30),
+      items: selectedQuote.items.map((item) => ({
+        ...item,
+        id: makeId(),
+      })),
+      attachments: [],
+      photos: [],
+      versions: [],
     };
 
-    if (newStatus === "accepted") {
-      updates.accepted_at =
-        new Date().toISOString();
-    }
+    const next = [...quotes, duplicated];
 
-    if (newStatus === "rejected") {
-      updates.rejected_at =
-        new Date().toISOString();
-    }
+    persist(next);
+    setSelectedQuoteId(duplicated.id);
 
-    const { error: updateError } =
-      await supabase
-        .from("repair_quotes")
-        .update(updates)
-        .eq("id", quote.id);
+    notify("Devis dupliqué.");
+  }
 
-    if (updateError) {
-      console.error(
-        "Erreur changement statut devis :",
-        updateError
-      );
+  function createVersion() {
+    if (!selectedQuote || isLocked) return;
 
-      setError(updateError.message);
-      setProcessingId(null);
+    const version: QuoteVersion = {
+      id: makeId(),
+      version: selectedQuote.version,
+      createdAt: new Date().toISOString(),
+      items: selectedQuote.items,
+      currency: selectedQuote.currency,
+      vatRate: selectedQuote.vatRate,
+      discountType: selectedQuote.discountType,
+      discountValue: selectedQuote.discountValue,
+      notes: selectedQuote.notes,
+    };
+
+    updateSelectedQuote({
+      version: selectedQuote.version + 1,
+      versions: [...selectedQuote.versions, version],
+      status: "draft",
+    });
+
+    notify(
+      `Version ${selectedQuote.version + 1} créée.`
+    );
+  }
+
+  function sendQuote() {
+    if (!selectedQuote || isLocked) return;
+
+    if (totalTTC <= 0) {
+      notify("Le total du devis doit être supérieur à 0 €.");
       return;
     }
 
-    setMessage(
-      newStatus === "sent"
-        ? "Le devis a été envoyé au client."
-        : newStatus === "accepted"
-        ? "Le devis a été accepté."
-        : "Le devis a été refusé."
-    );
+    applySettings();
 
-    setProcessingId(null);
+    updateSelectedQuote({
+      status: "sent",
+    });
 
-    await loadQuotes();
+    notify("Devis envoyé au client.");
   }
 
-  if (loading) {
+  function acceptQuote() {
+    if (!selectedQuote) return;
+
+    if (selectedQuote.status !== "sent") {
+      notify("Seul un devis envoyé peut être accepté.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Accepter ce devis ? Après acceptation, il sera verrouillé."
+    );
+
+    if (!confirmed) return;
+
+    updateSelectedQuote({
+      status: "accepted",
+    });
+
+    notify("Devis accepté et verrouillé.");
+  }
+
+  function rejectQuote() {
+    if (!selectedQuote) return;
+
+    if (selectedQuote.status !== "sent") {
+      notify("Ce devis n'est pas actuellement envoyé.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Voulez-vous refuser ce devis ?"
+    );
+
+    if (!confirmed) return;
+
+    updateSelectedQuote({
+      status: "rejected",
+    });
+
+    notify("Devis refusé.");
+  }
+
+  function printPDF() {
+    window.print();
+  }
+
+  function exportCSV() {
+    if (!selectedQuote) return;
+
+    const rows = [
+      [
+        "Devis",
+        "Version",
+        "Statut",
+        "Description",
+        "Quantité",
+        "Prix unitaire",
+        "Total ligne",
+      ],
+      ...selectedQuote.items.map((item) => [
+        selectedQuote.number,
+        selectedQuote.version,
+        selectedQuote.status,
+        item.description,
+        item.quantity,
+        item.unitPrice,
+        item.quantity * item.unitPrice,
+      ]),
+      [],
+      ["TOTAL HT", "", "", "", "", "", totalHT],
+      ["TVA", `${vatRate}%`, "", "", "", "", vatAmount],
+      ["TOTAL TTC", "", "", "", "", "", totalTTC],
+      ["COMMISSION FOLIOGA", `${COMMISSION_RATE * 100}%`, "", "", "", "", commission],
+      ["REVENU TECHNICIEN", "", "", "", "", "", technicianRevenue],
+    ];
+
+    const csv = rows
+      .map((row) => row.map(csvEscape).join(";"))
+      .join("\n");
+
+    const blob = new Blob([csv], {
+      type: "text/csv;charset=utf-8;",
+    });
+
+    const url = URL.createObjectURL(blob);
+
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${selectedQuote.number}.csv`;
+    link.click();
+
+    URL.revokeObjectURL(url);
+
+    notify("Export comptable CSV généré.");
+  }
+
+  function addAttachments(
+    event: ChangeEvent<HTMLInputElement>,
+    type: "attachments" | "photos"
+  ) {
+    if (!selectedQuote || isLocked) return;
+
+    const files = Array.from(event.target.files || []);
+
+    const mapped: Attachment[] = files.map((file) => ({
+      id: makeId(),
+      name: file.name,
+      size: file.size,
+      type: file.type,
+    }));
+
+    updateSelectedQuote({
+      [type]: [
+        ...selectedQuote[type],
+        ...mapped,
+      ],
+    } as Partial<Quote>);
+
+    notify(`${mapped.length} fichier(s) ajouté(s).`);
+
+    event.target.value = "";
+  }
+
+  function removeAttachment(
+    attachmentId: string,
+    type: "attachments" | "photos"
+  ) {
+    if (!selectedQuote || isLocked) return;
+
+    updateSelectedQuote({
+      [type]: selectedQuote[type].filter(
+        (file) => file.id !== attachmentId
+      ),
+    } as Partial<Quote>);
+  }
+
+  function sendDiscussionMessage() {
+    const message = discussionMessage.trim();
+
+    if (!message) return;
+
+    setDiscussion((current) => [
+      ...current,
+      message,
+    ]);
+
+    setDiscussionMessage("");
+
+    notify("Message ajouté à la discussion.");
+  }
+
+  function formatDate(value: string) {
+    return new Date(value).toLocaleDateString("fr-FR");
+  }
+
+  function statusLabel(status: QuoteStatus) {
+    switch (status) {
+      case "draft":
+        return "📝 Brouillon";
+      case "sent":
+        return "📤 Envoyé";
+      case "accepted":
+        return "✅ Accepté";
+      case "rejected":
+        return "❌ Refusé";
+      case "expired":
+        return "⏰ Expiré";
+      case "cancelled":
+        return "🚫 Annulé";
+    }
+  }
+
+  if (!selectedQuote) {
     return (
       <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="text-center text-slate-500">
+        <p className="font-semibold text-slate-500">
           Chargement des devis...
-        </div>
+        </p>
       </section>
     );
   }
 
   return (
-    <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:p-8">
-      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
-        <div>
-          <div className="text-sm font-bold text-blue-600">
-            💰 GESTION DU DEVIS
-          </div>
-
-          <h2 className="mt-1 text-2xl font-black text-slate-950">
-            Devis & prix final
-          </h2>
-
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
-            Consultez, créez et suivez les devis de
-            cette réparation.
-          </p>
-        </div>
-
-        {isAssignedTechnician && (
-          <button
-            type="button"
-            onClick={() =>
-              setShowBuilder(
-                (current) => !current
-              )
-            }
-            className="rounded-xl bg-slate-950 px-5 py-3 font-bold text-white transition hover:bg-blue-600"
-          >
-            {showBuilder
-              ? "Fermer"
-              : "➕ Nouveau devis"}
-          </button>
-        )}
-      </div>
-
-      {!isClient &&
-        hasTechnicianRole &&
-        !isAssignedTechnician && (
-          <div className="mt-6 rounded-2xl border border-orange-200 bg-orange-50 p-4 text-sm font-semibold text-orange-700">
-            ⚠️ Vous devez être le technicien
-            accepté pour créer un devis.
-          </div>
-        )}
-
-      {error && (
-        <div className="mt-6 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">
-          ⚠️ {error}
+    <section className="mt-8 space-y-6">
+      {notification && (
+        <div className="sticky top-4 z-50 rounded-2xl border border-blue-200 bg-blue-50 px-5 py-4 font-bold text-blue-700 shadow-lg">
+          {notification}
         </div>
       )}
 
-      {message && (
-        <div className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-semibold text-emerald-700">
-          ✅ {message}
-        </div>
-      )}
-
-      {showBuilder &&
-        isAssignedTechnician && (
-          <div className="mt-8 rounded-3xl border border-blue-200 bg-blue-50/50 p-5">
-            <h3 className="text-xl font-black text-slate-950">
-              Créer un devis
-            </h3>
-
-            <div className="mt-5 space-y-4">
-              {draftItems.map(
-                (item, index) => (
-                  <div
-                    key={index}
-                    className="rounded-2xl border border-slate-200 bg-white p-4"
-                  >
-                    <div className="grid gap-3 md:grid-cols-4">
-                      <input
-                        value={item.description}
-                        onChange={(event) =>
-                          updateDraftItem(
-                            index,
-                            "description",
-                            event.target.value
-                          )
-                        }
-                        placeholder="Description"
-                        className="rounded-xl border border-slate-300 px-4 py-3 md:col-span-2"
-                      />
-
-                      <select
-                        value={item.item_type}
-                        onChange={(event) =>
-                          updateDraftItem(
-                            index,
-                            "item_type",
-                            event.target.value
-                          )
-                        }
-                        className="rounded-xl border border-slate-300 bg-white px-4 py-3"
-                      >
-                        <option value="labor">
-                          🔧 Main-d'œuvre
-                        </option>
-
-                        <option value="part">
-                          🔩 Pièce
-                        </option>
-
-                        <option value="travel">
-                          🚗 Déplacement
-                        </option>
-
-                        <option value="other">
-                          📦 Autre
-                        </option>
-                      </select>
-
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={item.unit_price}
-                        onChange={(event) =>
-                          updateDraftItem(
-                            index,
-                            "unit_price",
-                            event.target.value
-                          )
-                        }
-                        placeholder="Prix unitaire"
-                        className="rounded-xl border border-slate-300 px-4 py-3"
-                      />
-                    </div>
-
-                    <div className="mt-3 flex items-center justify-between gap-3">
-                      <label className="text-sm font-bold text-slate-600">
-                        Quantité
-
-                        <input
-                          type="number"
-                          min="0.01"
-                          step="0.01"
-                          value={item.quantity}
-                          onChange={(event) =>
-                            updateDraftItem(
-                              index,
-                              "quantity",
-                              event.target.value
-                            )
-                          }
-                          className="ml-2 w-24 rounded-lg border border-slate-300 px-3 py-2"
-                        />
-                      </label>
-
-                      <div className="flex items-center gap-3">
-                        <span className="font-black text-slate-950">
-                          {money(
-                            item.quantity *
-                              item.unit_price
-                          )}
-                        </span>
-
-                        {draftItems.length > 1 && (
-                          <button
-                            type="button"
-                            onClick={() =>
-                              removeDraftItem(
-                                index
-                              )
-                            }
-                            className="text-sm font-bold text-red-600"
-                          >
-                            Supprimer
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )
-              )}
+      <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:p-8">
+        <div className="flex flex-col justify-between gap-5 lg:flex-row lg:items-start">
+          <div>
+            <div className="text-sm font-black uppercase tracking-wider text-blue-600">
+              💰 Gestion du devis
             </div>
+
+            <h2 className="mt-2 text-3xl font-black text-slate-950">
+              Devis & prix final
+            </h2>
+
+            <p className="mt-2 text-slate-500">
+              Création, versions, calculs, acceptation et suivi financier.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={createQuote}
+              className="rounded-xl bg-slate-950 px-4 py-3 font-bold text-white hover:bg-blue-600"
+            >
+              + Nouveau
+            </button>
 
             <button
               type="button"
-              onClick={addDraftItem}
-              className="mt-4 rounded-xl border border-blue-300 bg-white px-4 py-2 font-bold text-blue-700"
+              onClick={duplicateQuote}
+              className="rounded-xl border border-slate-300 px-4 py-3 font-bold text-slate-700 hover:border-blue-400"
             >
-              ➕ Ajouter une ligne
+              📋 Dupliquer
             </button>
 
-            <div className="mt-6 grid gap-4 md:grid-cols-3">
-              <div>
-                <label className="mb-2 block text-sm font-bold text-slate-700">
-                  Remise
-                </label>
+            <button
+              type="button"
+              onClick={printPDF}
+              className="rounded-xl border border-slate-300 px-4 py-3 font-bold text-slate-700 hover:border-blue-400"
+            >
+              🧾 PDF
+            </button>
 
+            <button
+              type="button"
+              onClick={exportCSV}
+              className="rounded-xl border border-slate-300 px-4 py-3 font-bold text-slate-700 hover:border-blue-400"
+            >
+              📤 CSV
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-8 grid gap-3 lg:grid-cols-4">
+          <input
+            value={search}
+            onChange={(event) =>
+              setSearch(event.target.value)
+            }
+            placeholder="🔎 Rechercher un devis..."
+            className="rounded-xl border border-slate-200 px-4 py-3 outline-none focus:border-blue-500"
+          />
+
+          <select
+            value={statusFilter}
+            onChange={(event) =>
+              setStatusFilter(
+                event.target.value as "all" | QuoteStatus
+              )
+            }
+            className="rounded-xl border border-slate-200 px-4 py-3"
+          >
+            <option value="all">Tous les statuts</option>
+            <option value="draft">Brouillons</option>
+            <option value="sent">Envoyés</option>
+            <option value="accepted">Acceptés</option>
+            <option value="rejected">Refusés</option>
+            <option value="expired">Expirés</option>
+          </select>
+
+          <select
+            value={periodFilter}
+            onChange={(event) =>
+              setPeriodFilter(
+                event.target.value as "all" | "30" | "90"
+              )
+            }
+            className="rounded-xl border border-slate-200 px-4 py-3"
+          >
+            <option value="all">Toutes les périodes</option>
+            <option value="30">30 derniers jours</option>
+            <option value="90">90 derniers jours</option>
+          </select>
+
+          <button
+            type="button"
+            onClick={() => setShowStats((value) => !value)}
+            className="rounded-xl bg-blue-50 px-4 py-3 font-bold text-blue-700"
+          >
+            📊 Statistiques
+          </button>
+        </div>
+
+        {showStats && (
+          <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+            <Stat label="Devis" value={stats.total} />
+            <Stat label="Acceptés" value={stats.accepted} />
+            <Stat label="Envoyés" value={stats.sent} />
+            <Stat label="Brouillons" value={stats.draft} />
+            <Stat label="Expirés" value={stats.expired} />
+            <Stat
+              label="Conversion"
+              value={`${stats.conversion}%`}
+            />
+          </div>
+        )}
+
+        <div className="mt-6 grid gap-2">
+          {filteredQuotes.map((quote) => (
+            <button
+              key={quote.id}
+              type="button"
+              onClick={() => setSelectedQuoteId(quote.id)}
+              className={
+                "flex flex-col justify-between gap-3 rounded-2xl border p-4 text-left md:flex-row md:items-center " +
+                (quote.id === selectedQuote.id
+                  ? "border-blue-500 bg-blue-50"
+                  : "border-slate-200 bg-white")
+              }
+            >
+              <div>
+                <div className="font-black text-slate-950">
+                  {quote.number} — V{quote.version}
+                </div>
+
+                <div className="text-sm text-slate-500">
+                  Créé le {formatDate(quote.createdAt)}
+                </div>
+              </div>
+
+              <div className="font-bold text-slate-700">
+                {statusLabel(quote.status)}
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div
+        id="quote-print-area"
+        className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:p-8"
+      >
+        <div className="flex flex-col justify-between gap-4 border-b border-slate-100 pb-6 md:flex-row">
+          <div>
+            <div className="text-sm font-bold text-blue-600">
+              FOLIOGA-TECH
+            </div>
+
+            <h3 className="mt-1 text-2xl font-black text-slate-950">
+              {selectedQuote.number}
+            </h3>
+
+            <p className="mt-1 text-sm text-slate-500">
+              Version {selectedQuote.version} · Créé le{" "}
+              {formatDate(selectedQuote.createdAt)}
+            </p>
+          </div>
+
+          <div className="flex flex-col items-start gap-2 md:items-end">
+            <span className="rounded-full bg-slate-100 px-4 py-2 text-sm font-bold">
+              {statusLabel(
+                isExpired
+                  ? "expired"
+                  : selectedQuote.status
+              )}
+            </span>
+
+            <span className="text-sm text-slate-500">
+              Valable jusqu'au{" "}
+              {formatDate(selectedQuote.validUntil)}
+            </span>
+          </div>
+        </div>
+
+        {selectedQuote.status === "accepted" && (
+          <div className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 font-bold text-emerald-700">
+            🔐 Devis accepté et verrouillé
+          </div>
+        )}
+
+        {selectedQuote.status === "expired" && (
+          <div className="mt-6 rounded-2xl border border-orange-200 bg-orange-50 px-5 py-4 font-bold text-orange-700">
+            ⏰ Ce devis est arrivé à expiration.
+          </div>
+        )}
+
+        <div className="mt-8 grid gap-4 md:grid-cols-3">
+          <div className="rounded-2xl bg-slate-50 p-4">
+            <div className="text-sm font-bold text-slate-500">
+              👥 Client
+            </div>
+            <div className="mt-1 font-black text-slate-900">
+              {clientId}
+            </div>
+          </div>
+
+          <div className="rounded-2xl bg-slate-50 p-4">
+            <div className="text-sm font-bold text-slate-500">
+              👨‍🔧 Technicien
+            </div>
+            <div className="mt-1 font-black text-slate-900">
+              {technicianId || "Non assigné"}
+            </div>
+          </div>
+
+          <div className="rounded-2xl bg-slate-50 p-4">
+            <div className="text-sm font-bold text-slate-500">
+              🕐 Échéance
+            </div>
+            <div className="mt-1 font-black text-slate-900">
+              {formatDate(selectedQuote.validUntil)}
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-8">
+          <div className="mb-3 flex items-center justify-between">
+            <h4 className="text-xl font-black text-slate-950">
+              Prestations
+            </h4>
+
+            <button
+              type="button"
+              onClick={addItem}
+              disabled={isLocked}
+              className="rounded-xl bg-blue-50 px-4 py-2 font-bold text-blue-700 disabled:opacity-40"
+            >
+              + Ajouter
+            </button>
+          </div>
+
+          <div className="space-y-3">
+            {selectedQuote.items.map((item) => (
+              <div
+                key={item.id}
+                className="grid gap-3 rounded-2xl border border-slate-200 p-4 md:grid-cols-[1fr_100px_140px_130px_40px]"
+              >
+                <input
+                  disabled={isLocked}
+                  value={item.description}
+                  onChange={(event) =>
+                    updateItem(item.id, {
+                      description: event.target.value,
+                    })
+                  }
+                  placeholder="Description de la prestation"
+                  className="rounded-xl border border-slate-200 px-3 py-3 disabled:bg-slate-100"
+                />
+
+                <input
+                  disabled={isLocked}
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={item.quantity}
+                  onChange={(event) =>
+                    updateItem(item.id, {
+                      quantity: Number(event.target.value),
+                    })
+                  }
+                  className="rounded-xl border border-slate-200 px-3 py-3 disabled:bg-slate-100"
+                  aria-label="Quantité"
+                />
+
+                <input
+                  disabled={isLocked}
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={item.unitPrice}
+                  onChange={(event) =>
+                    updateItem(item.id, {
+                      unitPrice: Number(event.target.value),
+                    })
+                  }
+                  className="rounded-xl border border-slate-200 px-3 py-3 disabled:bg-slate-100"
+                  aria-label="Prix unitaire"
+                />
+
+                <div className="flex items-center rounded-xl bg-slate-50 px-3 py-3 font-black">
+                  {money(
+                    item.quantity * item.unitPrice,
+                    currency
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  disabled={isLocked}
+                  onClick={() => removeItem(item.id)}
+                  className="rounded-xl text-red-500 hover:bg-red-50 disabled:opacity-30"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="mt-8 grid gap-6 lg:grid-cols-2">
+          <div className="space-y-4">
+            <div>
+              <label className="text-sm font-bold text-slate-600">
+                Devise
+              </label>
+
+              <select
+                disabled={isLocked}
+                value={currency}
+                onChange={(event) =>
+                  setCurrency(event.target.value)
+                }
+                className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-3"
+              >
+                <option value="EUR">EUR — Euro</option>
+                <option value="CHF">CHF — Franc suisse</option>
+                <option value="GBP">GBP — Livre sterling</option>
+                <option value="USD">USD — Dollar américain</option>
+                <option value="CAD">CAD — Dollar canadien</option>
+                <option value="MAD">MAD — Dirham marocain</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="text-sm font-bold text-slate-600">
+                TVA
+              </label>
+
+              <select
+                disabled={isLocked}
+                value={vatRate}
+                onChange={(event) =>
+                  setVatRate(Number(event.target.value))
+                }
+                className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-3"
+              >
+                <option value="0">0 %</option>
+                <option value="5.5">5,5 %</option>
+                <option value="10">10 %</option>
+                <option value="20">20 %</option>
+                <option value="21">21 %</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="text-sm font-bold text-slate-600">
+                Promotion
+              </label>
+
+              <div className="mt-1 grid grid-cols-[120px_1fr] gap-2">
                 <select
+                  disabled={isLocked}
                   value={discountType}
                   onChange={(event) =>
                     setDiscountType(
                       event.target.value as
-                        | "none"
-                        | "fixed"
                         | "percent"
+                        | "fixed"
                     )
                   }
-                  className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3"
+                  className="rounded-xl border border-slate-200 px-3 py-3"
                 >
-                  <option value="none">
-                    Aucune remise
-                  </option>
-
-                  <option value="fixed">
-                    Montant fixe (€)
-                  </option>
-
-                  <option value="percent">
-                    Pourcentage (%)
-                  </option>
+                  <option value="percent">%</option>
+                  <option value="fixed">Montant</option>
                 </select>
-              </div>
-
-              {discountType !== "none" && (
-                <div>
-                  <label className="mb-2 block text-sm font-bold text-slate-700">
-                    Valeur de la remise
-                  </label>
-
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={discountValue}
-                    onChange={(event) =>
-                      setDiscountValue(
-                        Number(
-                          event.target.value
-                        ) || 0
-                      )
-                    }
-                    className="w-full rounded-xl border border-slate-300 px-4 py-3"
-                  />
-                </div>
-              )}
-
-              <div>
-                <label className="mb-2 block text-sm font-bold text-slate-700">
-                  TVA (%)
-                </label>
 
                 <input
+                  disabled={isLocked}
                   type="number"
                   min="0"
-                  step="0.01"
-                  value={taxRate}
+                  value={discountValue}
                   onChange={(event) =>
-                    setTaxRate(
-                      Number(
-                        event.target.value
-                      ) || 0
+                    setDiscountValue(
+                      Number(event.target.value)
                     )
                   }
-                  className="w-full rounded-xl border border-slate-300 px-4 py-3"
+                  className="rounded-xl border border-slate-200 px-3 py-3"
                 />
               </div>
             </div>
 
-            <div className="mt-4 grid gap-4 md:grid-cols-2">
-              <div>
-                <label className="mb-2 block text-sm font-bold text-slate-700">
-                  Validité du devis
-                </label>
+            <div>
+              <label className="text-sm font-bold text-slate-600">
+                Validité
+              </label>
 
-                <input
-                  type="date"
-                  value={expiresAt}
-                  onChange={(event) =>
-                    setExpiresAt(
-                      event.target.value
-                    )
-                  }
-                  className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3"
+              <input
+                disabled={isLocked}
+                type="date"
+                value={selectedQuote.validUntil}
+                onChange={(event) =>
+                  updateSelectedQuote({
+                    validUntil: event.target.value,
+                  })
+                }
+                className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-3"
+              />
+            </div>
+
+            <div>
+              <label className="text-sm font-bold text-slate-600">
+                Notes
+              </label>
+
+              <textarea
+                disabled={isLocked}
+                value={notes}
+                onChange={(event) =>
+                  setNotes(event.target.value)
+                }
+                onBlur={applySettings}
+                rows={4}
+                placeholder="Conditions, garantie, informations complémentaires..."
+                className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-3"
+              />
+            </div>
+          </div>
+
+          <div className="rounded-3xl bg-slate-50 p-6">
+            <h4 className="text-xl font-black text-slate-950">
+              Total
+            </h4>
+
+            <div className="mt-5 space-y-3">
+              <TotalLine
+                label="Sous-total"
+                value={money(subtotal, currency)}
+              />
+
+              <TotalLine
+                label="Remise"
+                value={`-${money(
+                  discountAmount,
+                  currency
+                )}`}
+              />
+
+              <TotalLine
+                label="Total HT"
+                value={money(totalHT, currency)}
+              />
+
+              <TotalLine
+                label={`TVA ${vatRate}%`}
+                value={money(vatAmount, currency)}
+              />
+
+              <div className="border-t border-slate-200 pt-4">
+                <TotalLine
+                  label="TOTAL TTC"
+                  value={money(totalTTC, currency)}
+                  strong
                 />
               </div>
 
-              <div>
-                <label className="mb-2 block text-sm font-bold text-slate-700">
-                  Notes
-                </label>
+              <div className="mt-6 rounded-2xl border border-blue-100 bg-blue-50 p-4">
+                <div className="text-sm font-bold text-blue-700">
+                  Commission Folioga-Tech
+                </div>
 
-                <textarea
-                  value={notes}
-                  onChange={(event) =>
-                    setNotes(
-                      event.target.value
-                    )
-                  }
-                  rows={3}
-                  placeholder="Conditions, informations complémentaires..."
-                  className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3"
-                />
+                <div className="mt-1 text-xl font-black text-blue-950">
+                  {money(commission, currency)}
+                </div>
+
+                <div className="mt-3 text-sm text-blue-700">
+                  Revenu technicien estimé :{" "}
+                  <strong>
+                    {money(
+                      technicianRevenue,
+                      currency
+                    )}
+                  </strong>
+                </div>
               </div>
             </div>
+          </div>
+        </div>
 
-            <div className="mt-6 rounded-2xl bg-white p-5">
-              <div className="flex justify-between text-sm text-slate-500">
-                <span>Sous-total</span>
-                <span>
-                  {money(draftSubtotal)}
-                </span>
-              </div>
-
-              <div className="mt-2 flex justify-between text-sm text-slate-500">
-                <span>Remise</span>
-                <span>
-                  - {money(draftDiscount)}
-                </span>
-              </div>
-
-              <div className="mt-2 flex justify-between text-sm text-slate-500">
-                <span>TVA</span>
-                <span>
-                  {money(draftTax)}
-                </span>
-              </div>
-
-              <div className="mt-4 flex justify-between border-t border-slate-200 pt-4 text-xl font-black text-slate-950">
-                <span>Total TTC</span>
-                <span>
-                  {money(draftTtc)}
-                </span>
-              </div>
-            </div>
-
+        {!isLocked && (
+          <div className="mt-6 flex flex-col gap-3 sm:flex-row">
             <button
               type="button"
-              onClick={createQuote}
-              disabled={saving}
-              className="mt-6 w-full rounded-xl bg-blue-600 px-5 py-3 font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={() => {
+                setSaving(true);
+                applySettings();
+
+                window.setTimeout(() => {
+                  setSaving(false);
+                  notify("Brouillon sauvegardé.");
+                }, 300);
+              }}
+              className="flex-1 rounded-xl border border-slate-300 px-5 py-3 font-bold text-slate-700"
             >
               {saving
-                ? "Création..."
-                : "💰 Créer le devis"}
+                ? "Sauvegarde..."
+                : "💾 Sauvegarder le brouillon"}
             </button>
+
+            {isTechnician && (
+              <button
+                type="button"
+                onClick={sendQuote}
+                className="flex-1 rounded-xl bg-slate-950 px-5 py-3 font-bold text-white hover:bg-blue-600"
+              >
+                📤 Envoyer le devis
+              </button>
+            )}
           </div>
         )}
 
-      {quotes.length === 0 ? (
-        <div className="mt-8 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
-          <div className="text-4xl">
-            💰
+        {isClient && selectedQuote.status === "sent" && (
+          <div className="mt-6 grid gap-3 sm:grid-cols-2">
+            <button
+              type="button"
+              onClick={acceptQuote}
+              className="rounded-xl bg-emerald-600 px-5 py-3 font-bold text-white hover:bg-emerald-700"
+            >
+              ✅ Accepter le devis
+            </button>
+
+            <button
+              type="button"
+              onClick={rejectQuote}
+              className="rounded-xl bg-red-50 px-5 py-3 font-bold text-red-700 hover:bg-red-100"
+            >
+              ❌ Refuser
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:p-8">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-black uppercase tracking-wider text-blue-600">
+                📎 Documents
+              </div>
+
+              <h3 className="mt-1 text-xl font-black text-slate-950">
+                Pièces jointes
+              </h3>
+            </div>
+
+            <label
+              className={
+                "cursor-pointer rounded-xl bg-blue-50 px-4 py-3 font-bold text-blue-700 " +
+                (isLocked ? "pointer-events-none opacity-40" : "")
+              }
+            >
+              + Ajouter
+              <input
+                hidden
+                type="file"
+                multiple
+                disabled={isLocked}
+                onChange={(event) =>
+                  addAttachments(event, "attachments")
+                }
+              />
+            </label>
           </div>
 
-          <h3 className="mt-3 text-xl font-black text-slate-950">
-            Aucun devis
-          </h3>
+          <div className="mt-5 space-y-2">
+            {selectedQuote.attachments.length === 0 ? (
+              <p className="rounded-2xl bg-slate-50 p-5 text-center text-sm text-slate-500">
+                Aucun document.
+              </p>
+            ) : (
+              selectedQuote.attachments.map((file) => (
+                <div
+                  key={file.id}
+                  className="flex items-center justify-between rounded-xl bg-slate-50 p-3"
+                >
+                  <span className="truncate text-sm font-bold">
+                    📎 {file.name}
+                  </span>
 
-          <p className="mt-2 text-sm text-slate-500">
-            Le devis apparaîtra ici lorsqu'il sera créé.
-          </p>
-        </div>
-      ) : (
-        <div className="mt-8 space-y-6">
-          {quotes.map((quote) => {
-            const quoteItems =
-              items[quote.id] || [];
-
-            return (
-              <article
-                key={quote.id}
-                className="rounded-3xl border border-slate-200 bg-slate-50 p-5"
-              >
-                <div className="flex flex-col justify-between gap-4 sm:flex-row">
-                  <div>
-                    <div className="text-sm font-bold text-blue-600">
-                      DEVIS VERSION{" "}
-                      {quote.version}
-                    </div>
-
-                    <h3 className="mt-1 text-xl font-black text-slate-950">
-                      {money(
-                        quote.total_ttc,
-                        quote.currency
-                      )}
-                    </h3>
-                  </div>
-
-                  <span
-                    className={
-                      "h-fit w-fit rounded-full px-4 py-2 text-sm font-bold " +
-                      statusClass(
-                        quote.status
+                  <button
+                    type="button"
+                    disabled={isLocked}
+                    onClick={() =>
+                      removeAttachment(
+                        file.id,
+                        "attachments"
                       )
                     }
+                    className="text-red-500 disabled:opacity-30"
                   >
-                    {statusLabel(
-                      quote.status
-                    )}
-                  </span>
+                    ×
+                  </button>
                 </div>
-
-                {quoteItems.length > 0 && (
-                  <div className="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white">
-                    {quoteItems.map(
-                      (item) => (
-                        <div
-                          key={item.id}
-                          className="flex items-center justify-between gap-4 border-b border-slate-100 p-4 last:border-b-0"
-                        >
-                          <div>
-                            <div className="font-bold text-slate-800">
-                              {
-                                item.description
-                              }
-                            </div>
-
-                            <div className="text-xs text-slate-500">
-                              {
-                                item.quantity
-                              }{" "}
-                              ×{" "}
-                              {money(
-                                item.unit_price,
-                                quote.currency
-                              )}
-                            </div>
-                          </div>
-
-                          <div className="font-black text-slate-950">
-                            {money(
-                              item.total_price,
-                              quote.currency
-                            )}
-                          </div>
-                        </div>
-                      )
-                    )}
-                  </div>
-                )}
-
-                <div className="mt-5 grid gap-3 sm:grid-cols-3">
-                  <div className="rounded-xl bg-white p-3">
-                    <div className="text-xs font-bold text-slate-400">
-                      TOTAL HT
-                    </div>
-
-                    <div className="mt-1 font-black text-slate-950">
-                      {money(
-                        quote.total_ht,
-                        quote.currency
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl bg-white p-3">
-                    <div className="text-xs font-bold text-slate-400">
-                      TVA
-                    </div>
-
-                    <div className="mt-1 font-black text-slate-950">
-                      {money(
-                        quote.tax_amount,
-                        quote.currency
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl bg-white p-3">
-                    <div className="text-xs font-bold text-slate-400">
-                      TOTAL TTC
-                    </div>
-
-                    <div className="mt-1 font-black text-slate-950">
-                      {money(
-                        quote.total_ttc,
-                        quote.currency
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {quote.notes && (
-                  <div className="mt-4 rounded-xl bg-white p-4 text-sm text-slate-600">
-                    <strong>
-                      Notes :
-                    </strong>{" "}
-                    {quote.notes}
-                  </div>
-                )}
-
-                {quote.expires_at && (
-                  <div className="mt-4 text-xs font-semibold text-slate-500">
-                    ⏰ Valable jusqu'au{" "}
-                    {new Date(
-                      quote.expires_at
-                    ).toLocaleDateString(
-                      "fr-FR"
-                    )}
-                  </div>
-                )}
-
-                <div className="mt-5 flex flex-wrap gap-3">
-                  {isAssignedTechnician &&
-                    quote.technician_id ===
-                      userId &&
-                    quote.status === "draft" && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          changeQuoteStatus(
-                            quote,
-                            "sent"
-                          )
-                        }
-                        disabled={
-                          processingId ===
-                          quote.id
-                        }
-                        className="rounded-xl bg-blue-600 px-4 py-3 font-bold text-white disabled:opacity-50"
-                      >
-                        {processingId ===
-                        quote.id
-                          ? "Envoi..."
-                          : "📤 Envoyer au client"}
-                      </button>
-                    )}
-
-                  {isClient &&
-                    (quote.status ===
-                      "sent" ||
-                      quote.status ===
-                        "viewed" ||
-                      quote.status ===
-                        "negotiating") && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            changeQuoteStatus(
-                              quote,
-                              "accepted"
-                            )
-                          }
-                          disabled={
-                            processingId ===
-                            quote.id
-                          }
-                          className="rounded-xl bg-emerald-600 px-4 py-3 font-bold text-white disabled:opacity-50"
-                        >
-                          {processingId ===
-                          quote.id
-                            ? "Traitement..."
-                            : "✅ Accepter"}
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() =>
-                            changeQuoteStatus(
-                              quote,
-                              "rejected"
-                            )
-                          }
-                          disabled={
-                            processingId ===
-                            quote.id
-                          }
-                          className="rounded-xl border border-red-200 bg-white px-4 py-3 font-bold text-red-600 disabled:opacity-50"
-                        >
-                          ❌ Refuser
-                        </button>
-                      </>
-                    )}
-                </div>
-
-                {quote.status ===
-                  "accepted" && (
-                  <div className="mt-5 rounded-xl bg-emerald-50 p-4 text-center font-bold text-emerald-700">
-                    ✅ Ce devis a été accepté.
-                  </div>
-                )}
-              </article>
-            );
-          })}
+              ))
+            )}
+          </div>
         </div>
-      )}
 
-      {activeQuote?.status ===
-        "accepted" && (
-        <div className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
-          <div className="font-black text-emerald-800">
-            💳 Prochaine étape :
-            paiement
+        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:p-8">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-black uppercase tracking-wider text-blue-600">
+                📸 Diagnostic
+              </div>
+
+              <h3 className="mt-1 text-xl font-black text-slate-950">
+                Photos du diagnostic
+              </h3>
+            </div>
+
+            <label
+              className={
+                "cursor-pointer rounded-xl bg-blue-50 px-4 py-3 font-bold text-blue-700 " +
+                (isLocked ? "pointer-events-none opacity-40" : "")
+              }
+            >
+              📸 Ajouter
+              <input
+                hidden
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                multiple
+                disabled={isLocked}
+                onChange={(event) =>
+                  addAttachments(event, "photos")
+                }
+              />
+            </label>
           </div>
 
-          <p className="mt-1 text-sm text-emerald-700">
-            Le devis accepté pourra ensuite être
-            relié au système de paiement et à la
-            facture.
-          </p>
+          <div className="mt-5 grid gap-2">
+            {selectedQuote.photos.length === 0 ? (
+              <p className="rounded-2xl bg-slate-50 p-5 text-center text-sm text-slate-500">
+                Aucune photo.
+              </p>
+            ) : (
+              selectedQuote.photos.map((file) => (
+                <div
+                  key={file.id}
+                  className="flex items-center justify-between rounded-xl bg-slate-50 p-3"
+                >
+                  <span className="truncate text-sm font-bold">
+                    📸 {file.name}
+                  </span>
+
+                  <button
+                    type="button"
+                    disabled={isLocked}
+                    onClick={() =>
+                      removeAttachment(
+                        file.id,
+                        "photos"
+                      )
+                    }
+                    className="text-red-500 disabled:opacity-30"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
         </div>
-      )}
+      </div>
+
+      <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:p-8">
+        <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
+          <div>
+            <div className="text-sm font-black uppercase tracking-wider text-blue-600">
+              🔄 Versionnage
+            </div>
+
+            <h3 className="mt-1 text-xl font-black text-slate-950">
+              Historique du devis
+            </h3>
+
+            <p className="mt-1 text-sm text-slate-500">
+              Version actuelle : V{selectedQuote.version}
+            </p>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            {!isLocked && (
+              <button
+                type="button"
+                onClick={createVersion}
+                className="rounded-xl bg-blue-600 px-4 py-3 font-bold text-white"
+              >
+                + Nouvelle version
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() =>
+                setShowHistory((value) => !value)
+              }
+              className="rounded-xl border border-slate-300 px-4 py-3 font-bold"
+            >
+              {showHistory
+                ? "Masquer"
+                : "Voir l'historique"}
+            </button>
+          </div>
+        </div>
+
+        {showHistory && (
+          <div className="mt-5 space-y-2">
+            {selectedQuote.versions.length === 0 ? (
+              <div className="rounded-2xl bg-slate-50 p-5 text-center text-sm text-slate-500">
+                Aucun historique de version.
+              </div>
+            ) : (
+              selectedQuote.versions.map((version) => (
+                <div
+                  key={version.id}
+                  className="rounded-2xl border border-slate-200 p-4"
+                >
+                  <div className="font-black">
+                    Version {version.version}
+                  </div>
+
+                  <div className="text-sm text-slate-500">
+                    Créée le{" "}
+                    {formatDate(version.createdAt)}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:p-8">
+        <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
+          <div>
+            <div className="text-sm font-black uppercase tracking-wider text-blue-600">
+              💬 Discussion
+            </div>
+
+            <h3 className="mt-1 text-xl font-black text-slate-950">
+              Discussion liée au devis
+            </h3>
+
+            <p className="mt-1 text-sm text-slate-500">
+              Échangez directement au sujet du prix et des prestations.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={() =>
+              setShowDiscussion((value) => !value)
+            }
+            className="rounded-xl bg-slate-950 px-4 py-3 font-bold text-white"
+          >
+            💬 {showDiscussion ? "Fermer" : "Ouvrir"}
+          </button>
+        </div>
+
+        {showDiscussion && (
+          <div className="mt-6">
+            <div className="max-h-64 space-y-2 overflow-y-auto rounded-2xl bg-slate-50 p-4">
+              {discussion.length === 0 ? (
+                <p className="text-center text-sm text-slate-500">
+                  Aucun message.
+                </p>
+              ) : (
+                discussion.map((message, index) => (
+                  <div
+                    key={`${message}-${index}`}
+                    className="rounded-xl bg-white p-3 shadow-sm"
+                  >
+                    {message}
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="mt-3 flex gap-2">
+              <input
+                value={discussionMessage}
+                onChange={(event) =>
+                  setDiscussionMessage(
+                    event.target.value
+                  )
+                }
+                onKeyDown={(event) => {
+                  if (
+                    event.key === "Enter" &&
+                    !event.shiftKey
+                  ) {
+                    event.preventDefault();
+                    sendDiscussionMessage();
+                  }
+                }}
+                placeholder="Votre message..."
+                className="flex-1 rounded-xl border border-slate-200 px-4 py-3"
+              />
+
+              <button
+                type="button"
+                onClick={sendDiscussionMessage}
+                className="rounded-xl bg-blue-600 px-5 py-3 font-bold text-white"
+              >
+                Envoyer
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:p-8">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-sm font-black uppercase tracking-wider text-blue-600">
+              💳 Finance
+            </div>
+
+            <h3 className="mt-1 text-xl font-black text-slate-950">
+              Paiement & historique financier
+            </h3>
+          </div>
+        </div>
+
+        <div className="mt-5 grid gap-4 sm:grid-cols-3">
+          <FinanceCard
+            label="CA TTC"
+            value={money(totalTTC, currency)}
+          />
+
+          <FinanceCard
+            label="Commission Folioga"
+            value={money(commission, currency)}
+          />
+
+          <FinanceCard
+            label="CA technicien"
+            value={money(
+              technicianRevenue,
+              currency
+            )}
+          />
+        </div>
+
+        <div className="mt-5 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-5 text-sm text-slate-500">
+          💳 Le paiement en ligne, les remboursements et le reversement
+          automatique devront être connectés au système de paiement et à
+          Supabase dans l'étape backend.
+        </div>
+      </div>
+
+      <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm md:p-8">
+        <h3 className="text-xl font-black text-slate-950">
+          🔔 Notifications & rappels
+        </h3>
+
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          <ReminderCard
+            title="Expiration"
+            text={`Rappel avant le ${formatDate(
+              selectedQuote.validUntil
+            )}`}
+          />
+
+          <ReminderCard
+            title="Client"
+            text={
+              selectedQuote.status === "sent"
+                ? "En attente de réponse"
+                : "Aucune action"
+            }
+          />
+
+          <ReminderCard
+            title="Technicien"
+            text={
+              selectedQuote.status === "accepted"
+                ? "Devis accepté"
+                : "En attente"
+            }
+          />
+        </div>
+      </div>
+
+      <style jsx global>{`
+        @media print {
+          body {
+            background: white !important;
+          }
+
+          nav,
+          header,
+          footer,
+          button,
+          input,
+          select,
+          textarea,
+          label {
+            display: none !important;
+          }
+
+          #quote-print-area {
+            display: block !important;
+            border: 0 !important;
+            box-shadow: none !important;
+          }
+        }
+      `}</style>
     </section>
+  );
+}
+
+function TotalLine({
+  label,
+  value,
+  strong = false,
+}: {
+  label: string;
+  value: string;
+  strong?: boolean;
+}) {
+  return (
+    <div
+      className={
+        "flex items-center justify-between gap-4 " +
+        (strong
+          ? "text-xl font-black text-slate-950"
+          : "text-sm font-bold text-slate-600")
+      }
+    >
+      <span>{label}</span>
+      <span>{value}</span>
+    </div>
+  );
+}
+
+function Stat({
+  label,
+  value,
+}: {
+  label: string;
+  value: string | number;
+}) {
+  return (
+    <div className="rounded-2xl bg-slate-50 p-4">
+      <div className="text-xs font-bold uppercase text-slate-500">
+        {label}
+      </div>
+
+      <div className="mt-1 text-2xl font-black text-slate-950">
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function FinanceCard({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-200 p-5">
+      <div className="text-sm font-bold text-slate-500">
+        {label}
+      </div>
+
+      <div className="mt-2 text-2xl font-black text-slate-950">
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function ReminderCard({
+  title,
+  text,
+}: {
+  title: string;
+  text: string;
+}) {
+  return (
+    <div className="rounded-2xl bg-slate-50 p-5">
+      <div className="font-black text-slate-950">
+        {title}
+      </div>
+
+      <div className="mt-1 text-sm text-slate-500">
+        {text}
+      </div>
+    </div>
   );
 }
