@@ -1,0 +1,778 @@
+```tsx
+"use client";
+
+import { ChangeEvent, useEffect, useMemo, useState } from "react";
+import { supabase } from "@/lib/supabase";
+
+type PhotoType = "before" | "during" | "after";
+
+type RepairPhoto = {
+  id: string;
+  repair_request_id: string;
+  uploaded_by: string;
+  storage_path: string;
+  photo_type: PhotoType;
+  caption: string | null;
+  created_at: string;
+};
+
+type RepairPhotosProps = {
+  repairRequestId: string;
+};
+
+const PHOTO_TYPES: {
+  value: PhotoType;
+  label: string;
+  description: string;
+  icon: string;
+}[] = [
+  {
+    value: "before",
+    label: "Avant réparation",
+    description: "État de l'appareil avant intervention",
+    icon: "📸",
+  },
+  {
+    value: "during",
+    label: "Pendant réparation",
+    description: "Étapes importantes de l'intervention",
+    icon: "🔧",
+  },
+  {
+    value: "after",
+    label: "Après réparation",
+    description: "Résultat final après intervention",
+    icon: "✅",
+  },
+];
+
+export default function RepairPhotos({
+  repairRequestId,
+}: RepairPhotosProps) {
+  const [photos, setPhotos] = useState<RepairPhoto[]>([]);
+  const [userId, setUserId] = useState<string | null>(null);
+
+  const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+
+  const [selectedType, setSelectedType] =
+    useState<PhotoType>("before");
+
+  const [caption, setCaption] = useState("");
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+
+  /*
+   * ============================================================
+   * URL PUBLIQUE D'UNE PHOTO
+   * ============================================================
+   *
+   * Le bucket Supabase utilisé ici est :
+   *
+   * repair-photos
+   *
+   * Le bucket doit être PUBLIC.
+   */
+
+  function getPhotoUrl(storagePath: string) {
+    const { data } = supabase.storage
+      .from("repair-photos")
+      .getPublicUrl(storagePath);
+
+    return data.publicUrl;
+  }
+
+  /*
+   * ============================================================
+   * CHARGEMENT DES PHOTOS
+   * ============================================================
+   */
+
+  async function loadPhotos() {
+    setLoading(true);
+    setError("");
+
+    const { data, error: photosError } = await supabase
+      .from("repair_photos")
+      .select(
+        "id, repair_request_id, uploaded_by, storage_path, photo_type, caption, created_at"
+      )
+      .eq("repair_request_id", repairRequestId)
+      .order("created_at", {
+        ascending: true,
+      });
+
+    if (photosError) {
+      console.error(
+        "Erreur chargement photos :",
+        photosError
+      );
+
+      setPhotos([]);
+
+      setError(
+        `Impossible de charger les photos : ${
+          photosError.message || ""
+        }`
+      );
+
+      setLoading(false);
+      return;
+    }
+
+    setPhotos((data || []) as RepairPhoto[]);
+    setLoading(false);
+  }
+
+  /*
+   * ============================================================
+   * INITIALISATION
+   * ============================================================
+   */
+
+  useEffect(() => {
+    let mounted = true;
+
+    async function init() {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        if (mounted) {
+          setError("Vous devez être connecté.");
+          setLoading(false);
+        }
+
+        return;
+      }
+
+      if (!mounted) return;
+
+      setUserId(user.id);
+
+      await loadPhotos();
+    }
+
+    init();
+
+    return () => {
+      mounted = false;
+    };
+  }, [repairRequestId]);
+
+  /*
+   * ============================================================
+   * GROUPES
+   * ============================================================
+   */
+
+  const groupedPhotos = useMemo(() => {
+    return {
+      before: photos.filter(
+        (photo) => photo.photo_type === "before"
+      ),
+      during: photos.filter(
+        (photo) => photo.photo_type === "during"
+      ),
+      after: photos.filter(
+        (photo) => photo.photo_type === "after"
+      ),
+    };
+  }, [photos]);
+
+  /*
+   * ============================================================
+   * SÉLECTION DE FICHIERS
+   * ============================================================
+   */
+
+  async function handleFileChange(
+    event: ChangeEvent<HTMLInputElement>
+  ) {
+    const files = event.target.files;
+
+    if (!files || files.length === 0) {
+      return;
+    }
+
+    if (!userId) {
+      setError("Vous devez être connecté.");
+      return;
+    }
+
+    setUploading(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      /*
+       * Limite volontaire pour éviter les uploads massifs.
+       */
+
+      if (files.length > 10) {
+        throw new Error(
+          "Vous pouvez envoyer au maximum 10 photos à la fois."
+        );
+      }
+
+      /*
+       * --------------------------------------------------------
+       * UPLOAD DE CHAQUE PHOTO
+       * --------------------------------------------------------
+       */
+
+      for (const file of Array.from(files)) {
+        /*
+         * Vérification du type.
+         */
+
+        if (!file.type.startsWith("image/")) {
+          throw new Error(
+            `Le fichier "${file.name}" n'est pas une image.`
+          );
+        }
+
+        /*
+         * Limite de 10 Mo par image.
+         */
+
+        if (file.size > 10 * 1024 * 1024) {
+          throw new Error(
+            `La photo "${file.name}" dépasse la limite de 10 Mo.`
+          );
+        }
+
+        /*
+         * Extension propre.
+         */
+
+        const extension =
+          file.name.split(".").pop()?.toLowerCase() ||
+          "jpg";
+
+        /*
+         * ID aléatoire compatible navigateur.
+         */
+
+        const randomId =
+          typeof crypto !== "undefined" &&
+          typeof crypto.randomUUID === "function"
+            ? crypto.randomUUID()
+            : `${Date.now()}-${Math.random()
+                .toString(36)
+                .slice(2)}`;
+
+        /*
+         * Organisation professionnelle du stockage :
+         *
+         * repairRequestId/
+         *   before/
+         *   during/
+         *   after/
+         *
+         * /userId/
+         * /randomId
+         */
+
+        const storagePath =
+          `${repairRequestId}/${selectedType}/${userId}/${randomId}.${extension}`;
+
+        /*
+         * Upload vers Supabase Storage.
+         */
+
+        const { error: uploadError } =
+          await supabase.storage
+            .from("repair-photos")
+            .upload(storagePath, file, {
+              cacheControl: "3600",
+              upsert: false,
+              contentType: file.type,
+            });
+
+        if (uploadError) {
+          console.error(
+            "Erreur upload photo :",
+            uploadError
+          );
+
+          throw new Error(
+            `Impossible d'envoyer "${file.name}" : ${uploadError.message}`
+          );
+        }
+
+        /*
+         * Création de l'enregistrement en base.
+         */
+
+        const { error: insertError } = await supabase
+          .from("repair_photos")
+          .insert({
+            repair_request_id: repairRequestId,
+            uploaded_by: userId,
+            storage_path: storagePath,
+            photo_type: selectedType,
+            caption:
+              caption.trim() !== ""
+                ? caption.trim()
+                : null,
+          });
+
+        /*
+         * Si la base refuse l'enregistrement,
+         * on supprime aussi le fichier Storage.
+         */
+
+        if (insertError) {
+          console.error(
+            "Erreur création photo en base :",
+            insertError
+          );
+
+          await supabase.storage
+            .from("repair-photos")
+            .remove([storagePath]);
+
+          throw new Error(
+            `Impossible d'enregistrer la photo : ${insertError.message}`
+          );
+        }
+      }
+
+      setCaption("");
+
+      setSuccess(
+        `${files.length} photo${
+          files.length > 1 ? "s" : ""
+        } ajoutée${files.length > 1 ? "s" : ""} avec succès.`
+      );
+
+      await loadPhotos();
+
+      /*
+       * Reset input.
+       */
+
+      event.target.value = "";
+    } catch (uploadError) {
+      console.error(
+        "Erreur traitement photos :",
+        uploadError
+      );
+
+      setError(
+        uploadError instanceof Error
+          ? uploadError.message
+          : "Une erreur est survenue pendant l'envoi."
+      );
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  /*
+   * ============================================================
+   * SUPPRESSION D'UNE PHOTO
+   * ============================================================
+   */
+
+  async function deletePhoto(photo: RepairPhoto) {
+    if (!userId) {
+      setError("Vous devez être connecté.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Voulez-vous vraiment supprimer cette photo ?"
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setError("");
+    setSuccess("");
+
+    /*
+     * Vérification côté interface.
+     *
+     * La sécurité réelle doit également être assurée
+     * par les policies Supabase.
+     */
+
+    if (photo.uploaded_by !== userId) {
+      setError(
+        "Vous ne pouvez supprimer que les photos que vous avez ajoutées."
+      );
+
+      return;
+    }
+
+    /*
+     * Suppression Storage.
+     */
+
+    const { error: storageError } =
+      await supabase.storage
+        .from("repair-photos")
+        .remove([photo.storage_path]);
+
+    if (storageError) {
+      console.error(
+        "Erreur suppression Storage :",
+        storageError
+      );
+
+      setError(
+        `Impossible de supprimer le fichier : ${storageError.message}`
+      );
+
+      return;
+    }
+
+    /*
+     * Suppression base de données.
+     */
+
+    const { error: databaseError } = await supabase
+      .from("repair_photos")
+      .delete()
+      .eq("id", photo.id);
+
+    if (databaseError) {
+      console.error(
+        "Erreur suppression base :",
+        databaseError
+      );
+
+      setError(
+        `Le fichier a été supprimé du stockage mais pas de la base : ${databaseError.message}`
+      );
+
+      return;
+    }
+
+    setPhotos((current) =>
+      current.filter((item) => item.id !== photo.id)
+    );
+
+    setSuccess("Photo supprimée.");
+  }
+
+  /*
+   * ============================================================
+   * COMPOSANT D'UN GROUPE
+   * ============================================================
+   */
+
+  function PhotoGroup({
+    type,
+    title,
+    description,
+    icon,
+  }: {
+    type: PhotoType;
+    title: string;
+    description: string;
+    icon: string;
+  }) {
+    const items = groupedPhotos[type];
+
+    return (
+      <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 className="flex items-center gap-2 text-lg font-black text-slate-950">
+              <span>{icon}</span>
+              {title}
+            </h3>
+
+            <p className="mt-1 text-sm text-slate-500">
+              {description}
+            </p>
+          </div>
+
+          <div className="rounded-full bg-white px-3 py-1 text-xs font-black text-slate-600 shadow-sm">
+            {items.length} photo
+            {items.length > 1 ? "s" : ""}
+          </div>
+        </div>
+
+        {items.length === 0 ? (
+          <div className="mt-5 rounded-2xl border border-dashed border-slate-300 bg-white p-6 text-center">
+            <div className="text-3xl opacity-60">
+              {icon}
+            </div>
+
+            <p className="mt-2 text-sm font-semibold text-slate-500">
+              Aucune photo pour cette étape.
+            </p>
+          </div>
+        ) : (
+          <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {items.map((photo) => (
+              <div
+                key={photo.id}
+                className="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
+              >
+                <div className="relative aspect-[4/3] overflow-hidden bg-slate-100">
+                  <img
+                    src={getPhotoUrl(
+                      photo.storage_path
+                    )}
+                    alt={
+                      photo.caption ||
+                      `${title} - photo de réparation`
+                    }
+                    className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
+                  />
+                </div>
+
+                <div className="p-4">
+                  {photo.caption && (
+                    <p className="text-sm font-semibold text-slate-700">
+                      {photo.caption}
+                    </p>
+                  )}
+
+                  <p className="mt-2 text-xs text-slate-400">
+                    {new Date(
+                      photo.created_at
+                    ).toLocaleString("fr-FR", {
+                      day: "2-digit",
+                      month: "2-digit",
+                      year: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </p>
+
+                  {userId === photo.uploaded_by && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        deletePhoto(photo)
+                      }
+                      className="mt-3 text-xs font-bold text-red-600 hover:text-red-800"
+                    >
+                      Supprimer
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  /*
+   * ============================================================
+   * AFFICHAGE
+   * ============================================================
+   */
+
+  return (
+    <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+      {/* HEADER */}
+
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <div className="text-sm font-black text-blue-600">
+            📸 SUIVI VISUEL
+          </div>
+
+          <h2 className="mt-1 text-2xl font-black text-slate-950">
+            Photos de la réparation
+          </h2>
+
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
+            Documentez l'état de votre appareil avant,
+            pendant et après la réparation. Les photos sont
+            associées directement à cette demande.
+          </p>
+        </div>
+
+        <div className="rounded-2xl bg-slate-100 px-4 py-3 text-center">
+          <div className="text-2xl font-black text-slate-950">
+            {photos.length}
+          </div>
+
+          <div className="text-xs font-bold text-slate-500">
+            photo{photos.length > 1 ? "s" : ""}
+          </div>
+        </div>
+      </div>
+
+      {/* MESSAGES */}
+
+      {error && (
+        <div className="mt-6 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">
+          ⚠️ {error}
+        </div>
+      )}
+
+      {success && (
+        <div className="mt-6 rounded-2xl border border-green-200 bg-green-50 p-4 text-sm font-semibold text-green-700">
+          ✅ {success}
+        </div>
+      )}
+
+      {/* UPLOAD */}
+
+      <div className="mt-6 rounded-3xl border border-blue-100 bg-blue-50/50 p-5">
+        <h3 className="text-lg font-black text-slate-950">
+          Ajouter des photos
+        </h3>
+
+        <p className="mt-1 text-sm text-slate-500">
+          Choisissez l'étape de réparation puis
+          sélectionnez une ou plusieurs images.
+        </p>
+
+        {/* TYPES */}
+
+        <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-3">
+          {PHOTO_TYPES.map((type) => {
+            const selected =
+              selectedType === type.value;
+
+            return (
+              <button
+                key={type.value}
+                type="button"
+                onClick={() =>
+                  setSelectedType(type.value)
+                }
+                className={
+                  "rounded-2xl border p-4 text-left transition " +
+                  (selected
+                    ? "border-blue-500 bg-white shadow-md ring-2 ring-blue-100"
+                    : "border-slate-200 bg-white hover:border-blue-300")
+                }
+              >
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl">
+                    {type.icon}
+                  </span>
+
+                  <div>
+                    <div className="font-black text-slate-950">
+                      {type.label}
+                    </div>
+
+                    <div className="mt-1 text-xs text-slate-500">
+                      {type.description}
+                    </div>
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* CAPTION */}
+
+        <div className="mt-5">
+          <label
+            htmlFor="photo-caption"
+            className="mb-2 block text-sm font-bold text-slate-700"
+          >
+            Description de la photo
+            <span className="ml-1 font-normal text-slate-400">
+              (facultatif)
+            </span>
+          </label>
+
+          <input
+            id="photo-caption"
+            type="text"
+            value={caption}
+            onChange={(event) =>
+              setCaption(event.target.value)
+            }
+            maxLength={300}
+            placeholder="Ex. Écran fissuré côté droit"
+            className="w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+          />
+        </div>
+
+        {/* INPUT */}
+
+        <div className="mt-5">
+          <label
+            htmlFor="repair-photo-upload"
+            className={
+              "flex cursor-pointer flex-col items-center justify-center rounded-3xl border-2 border-dashed p-8 text-center transition " +
+              (uploading
+                ? "cursor-wait border-slate-300 bg-slate-100"
+                : "border-blue-300 bg-white hover:border-blue-500 hover:bg-blue-50")
+            }
+          >
+            <div className="text-4xl">
+              {uploading ? "⏳" : "📷"}
+            </div>
+
+            <div className="mt-3 font-black text-slate-950">
+              {uploading
+                ? "Envoi des photos..."
+                : "Sélectionner des photos"}
+            </div>
+
+            <div className="mt-1 text-sm text-slate-500">
+              JPG, PNG, WEBP — 10 Mo maximum par photo
+            </div>
+
+            <input
+              id="repair-photo-upload"
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/gif"
+              multiple
+              disabled={uploading}
+              onChange={handleFileChange}
+              className="hidden"
+            />
+          </label>
+        </div>
+      </div>
+
+      {/* GALERIE */}
+
+      {loading ? (
+        <div className="mt-6 rounded-2xl bg-slate-50 p-8 text-center">
+          <div className="text-3xl">⏳</div>
+
+          <p className="mt-2 text-sm font-semibold text-slate-500">
+            Chargement des photos...
+          </p>
+        </div>
+      ) : (
+        <div className="mt-6 space-y-5">
+          <PhotoGroup
+            type="before"
+            title="Avant réparation"
+            description="État initial de l'appareil"
+            icon="📸"
+          />
+
+          <PhotoGroup
+            type="during"
+            title="Pendant réparation"
+            description="Étapes de l'intervention"
+            icon="🔧"
+          />
+
+          <PhotoGroup
+            type="after"
+            title="Après réparation"
+            description="Résultat final"
+            icon="✅"
+          />
+        </div>
+      )}
+    </section>
+  );
+}
+```

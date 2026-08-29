@@ -9,7 +9,6 @@ import {
 } from "react";
 
 import { supabase } from "@/lib/supabase";
-import { useLocale } from "next-intl";
 
 type QuoteStatus =
   | "draft"
@@ -143,8 +142,6 @@ export default function RepairQuotes({
   userId,
   userRole,
 }: Props) {
-  const locale = useLocale();
-
   const isClient = userId === clientId;
 
   const isTechnician =
@@ -1230,52 +1227,28 @@ export default function RepairQuotes({
     setError("");
     setMessage("");
 
-    try {
-      const response = await fetch(
-        "/api/stripe/create-checkout-session",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type":
-              "application/json",
-          },
-          body: JSON.stringify({
-            quoteId: quote.id,
-                locale,
-          }),
-        }
-      );
+    /*
+     * IMPORTANT :
+     * Ici nous ne faisons volontairement PAS :
+     *
+     * repair_quote_payments.insert({ status: "paid" })
+     *
+     * car cela déclarerait un paiement sans avoir
+     * réellement encaissé la carte bancaire.
+     *
+     * Pour le moment, on affiche un message.
+     * Cette fonction est l'endroit où brancher
+     * Stripe Checkout.
+     */
 
-      const data = await response.json();
+    setMessage(
+      `Paiement de ${money(
+        quote.total_ttc,
+        quote.currency
+      )} prêt à être effectué. 💳`
+    );
 
-      if (!response.ok) {
-        throw new Error(
-          data.error ||
-            "Impossible de préparer le paiement."
-        );
-      }
-
-      if (!data.url) {
-        throw new Error(
-          "Stripe n'a pas retourné de page de paiement."
-        );
-      }
-
-      window.location.href = data.url;
-    } catch (error) {
-      console.error(
-        "Erreur paiement Stripe:",
-        error
-      );
-
-      setError(
-        error instanceof Error
-          ? error.message
-          : "Impossible de démarrer le paiement."
-      );
-
-      setPaying(null);
-    }
+    setPaying(null);
   }
 
   async function registerPayment(

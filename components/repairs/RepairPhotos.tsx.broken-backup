@@ -1,0 +1,799 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { supabase } from "@/lib/supabase";
+
+type PhotoType = "before" | "during" | "after";
+
+type RepairPhoto = {
+id: string;
+repair_request_id: string;
+uploaded_by: string;
+photo_url: string;
+storage_path: string;
+photo_type: PhotoType;
+caption: string | null;
+created_at: string;
+};
+
+type RepairPhotosProps = {
+repairRequestId: string;
+};
+
+const PHOTO_TYPES: {
+value: PhotoType;
+label: string;
+description: string;
+icon: string;
+}[] = [
+{
+value: "before",
+label: "Avant réparation",
+description: "État de l'appareil avant intervention",
+icon: "📸",
+},
+{
+value: "during",
+label: "Pendant réparation",
+description: "Étapes importantes de l'intervention",
+icon: "🔧",
+},
+{
+value: "after",
+label: "Après réparation",
+description: "Résultat final de la réparation",
+icon: "✅",
+},
+];
+
+export default function RepairPhotos({
+repairRequestId,
+}: RepairPhotosProps) {
+const [photos, setPhotos] = useState<RepairPhoto[]>([]);
+const [selectedType, setSelectedType] =
+useState<PhotoType>("before");
+
+const [loading, setLoading] = useState(true);
+const [uploading, setUploading] = useState(false);
+const [deletingId, setDeletingId] = useState<string | null>(
+null
+);
+
+const [userId, setUserId] = useState<string | null>(null);
+const [error, setError] = useState("");
+
+/*
+
+* ============================================================
+* CHARGEMENT DES PHOTOS
+* ============================================================
+  */
+
+const loadPhotos = useCallback(async () => {
+setLoading(true);
+setError("");
+
+```
+const {
+  data: { user },
+  error: userError,
+} = await supabase.auth.getUser();
+
+if (userError || !user) {
+  setError("Vous devez être connecté.");
+  setLoading(false);
+  return;
+}
+
+setUserId(user.id);
+
+const { data, error: photosError } = await supabase
+  .from("repair_photos")
+  .select(
+    `
+      id,
+      repair_request_id,
+      uploaded_by,
+      photo_url,
+      storage_path,
+      photo_type,
+      caption,
+      created_at
+    `
+  )
+  .eq("repair_request_id", repairRequestId)
+  .order("created_at", {
+    ascending: false,
+  });
+
+if (photosError) {
+  console.error(
+    "Erreur chargement photos :",
+    photosError
+  );
+
+  setPhotos([]);
+
+  setError(
+    `Impossible de charger les photos : ${
+      photosError.message || ""
+    }`
+  );
+
+  setLoading(false);
+  return;
+}
+
+setPhotos((data || []) as RepairPhoto[]);
+setLoading(false);
+```
+
+}, [repairRequestId]);
+
+useEffect(() => {
+loadPhotos();
+}, [loadPhotos]);
+
+/*
+
+* ============================================================
+* COMPTEURS
+* ============================================================
+  */
+
+const counts = useMemo(() => {
+return {
+before: photos.filter(
+(photo) => photo.photo_type === "before"
+).length,
+
+```
+  during: photos.filter(
+    (photo) => photo.photo_type === "during"
+  ).length,
+
+  after: photos.filter(
+    (photo) => photo.photo_type === "after"
+  ).length,
+};
+```
+
+}, [photos]);
+
+/*
+
+* ============================================================
+* PHOTOS FILTRÉES
+* ============================================================
+  */
+
+const visiblePhotos = useMemo(() => {
+return photos.filter(
+(photo) => photo.photo_type === selectedType
+);
+}, [photos, selectedType]);
+
+/*
+
+* ============================================================
+* UPLOAD
+* ============================================================
+  */
+
+async function handleUpload(
+event: React.ChangeEvent<HTMLInputElement>
+) {
+const files = event.target.files;
+
+```
+if (!files || files.length === 0) {
+  return;
+}
+
+if (!userId) {
+  setError("Vous devez être connecté.");
+  return;
+}
+
+setUploading(true);
+setError("");
+
+try {
+  const selectedFiles = Array.from(files);
+
+  /*
+   * Limite de sécurité côté interface.
+   */
+
+  const validFiles = selectedFiles.filter((file) => {
+    const validType =
+      file.type.startsWith("image/");
+
+    const validSize =
+      file.size <= 10 * 1024 * 1024;
+
+    return validType && validSize;
+  });
+
+  if (validFiles.length !== selectedFiles.length) {
+    setError(
+      "Certains fichiers ont été ignorés. Seules les images de 10 Mo maximum sont acceptées."
+    );
+  }
+
+  for (const file of validFiles) {
+    /*
+     * Nom unique.
+     */
+
+    const extension =
+      file.name.split(".").pop()?.toLowerCase() ||
+      "jpg";
+
+    const randomId =
+      typeof crypto !== "undefined" &&
+      "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random()
+            .toString(36)
+            .slice(2)}`;
+
+    const storagePath =
+      `${repairRequestId}/${selectedType}/${userId}/${randomId}.${extension}`;
+
+    /*
+     * --------------------------------------------------------
+     * STORAGE
+     * --------------------------------------------------------
+     */
+
+    const { error: uploadError } =
+      await supabase.storage
+        .from("repair-photos")
+        .upload(storagePath, file, {
+          cacheControl: "3600",
+          upsert: false,
+          contentType: file.type,
+        });
+
+    if (uploadError) {
+      console.error(
+        "Erreur upload photo :",
+        uploadError
+      );
+
+      throw new Error(
+        uploadError.message ||
+          "Impossible d'envoyer la photo."
+      );
+    }
+
+    /*
+     * --------------------------------------------------------
+     * URL PUBLIQUE
+     * --------------------------------------------------------
+     *
+     * Le bucket doit être public pour cette version.
+     */
+
+    const {
+      data: publicUrlData,
+    } = supabase.storage
+      .from("repair-photos")
+      .getPublicUrl(storagePath);
+
+    const photoUrl =
+      publicUrlData.publicUrl;
+
+    /*
+     * --------------------------------------------------------
+     * BASE DE DONNÉES
+     * --------------------------------------------------------
+     */
+
+    const { data: insertedPhoto, error: insertError } =
+      await supabase
+        .from("repair_photos")
+        .insert({
+          repair_request_id: repairRequestId,
+          uploaded_by: userId,
+          photo_url: photoUrl,
+          storage_path: storagePath,
+          photo_type: selectedType,
+          caption: null,
+        })
+        .select(
+          `
+            id,
+            repair_request_id,
+            uploaded_by,
+            photo_url,
+            storage_path,
+            photo_type,
+            caption,
+            created_at
+          `
+        )
+        .single();
+
+    if (insertError) {
+      /*
+       * Si la DB échoue, on essaie de supprimer
+       * le fichier déjà envoyé dans Storage.
+       */
+
+      await supabase.storage
+        .from("repair-photos")
+        .remove([storagePath]);
+
+      console.error(
+        "Erreur insertion photo :",
+        insertError
+      );
+
+      throw new Error(
+        insertError.message ||
+          "Impossible d'enregistrer la photo."
+      );
+    }
+
+    if (insertedPhoto) {
+      setPhotos((current) => [
+        insertedPhoto as RepairPhoto,
+        ...current,
+      ]);
+    }
+  }
+} catch (uploadError) {
+  console.error(uploadError);
+
+  setError(
+    uploadError instanceof Error
+      ? uploadError.message
+      : "Une erreur est survenue pendant l'envoi."
+  );
+} finally {
+  setUploading(false);
+
+  /*
+   * Permet de sélectionner à nouveau le même fichier.
+   */
+
+  event.target.value = "";
+}
+```
+
+}
+
+/*
+
+* ============================================================
+* SUPPRESSION
+* ============================================================
+  */
+
+async function handleDelete(photo: RepairPhoto) {
+const confirmed = window.confirm(
+"Voulez-vous vraiment supprimer cette photo ?"
+);
+
+```
+if (!confirmed) {
+  return;
+}
+
+setDeletingId(photo.id);
+setError("");
+
+try {
+  /*
+   * Supprimer d'abord de la base.
+   *
+   * Les policies Supabase doivent autoriser
+   * l'utilisateur concerné à supprimer la photo.
+   */
+
+  const { error: deleteDbError } =
+    await supabase
+      .from("repair_photos")
+      .delete()
+      .eq("id", photo.id);
+
+  if (deleteDbError) {
+    console.error(
+      "Erreur suppression DB :",
+      deleteDbError
+    );
+
+    throw new Error(
+      deleteDbError.message ||
+        "Impossible de supprimer la photo."
+    );
+  }
+
+  /*
+   * Supprimer le fichier Storage.
+   */
+
+  const { error: deleteStorageError } =
+    await supabase.storage
+      .from("repair-photos")
+      .remove([photo.storage_path]);
+
+  if (deleteStorageError) {
+    console.warn(
+      "Photo supprimée de la DB mais pas du Storage :",
+      deleteStorageError
+    );
+  }
+
+  setPhotos((current) =>
+    current.filter(
+      (item) => item.id !== photo.id
+    )
+  );
+} catch (deleteError) {
+  console.error(deleteError);
+
+  setError(
+    deleteError instanceof Error
+      ? deleteError.message
+      : "Impossible de supprimer la photo."
+  );
+} finally {
+  setDeletingId(null);
+}
+```
+
+}
+
+/*
+
+* ============================================================
+* DATE
+* ============================================================
+  */
+
+function formatDate(date: string) {
+return new Date(date).toLocaleString(
+"fr-FR",
+{
+day: "2-digit",
+month: "2-digit",
+year: "numeric",
+hour: "2-digit",
+minute: "2-digit",
+}
+);
+}
+
+/*
+
+* ============================================================
+* AFFICHAGE
+* ============================================================
+  */
+
+return ( <section className="mt-8 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+
+```
+  {/* ======================================================
+      HEADER
+  ====================================================== */}
+
+  <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
+
+    <div>
+      <div className="text-sm font-black uppercase tracking-wide text-blue-600">
+        📸 Suivi visuel
+      </div>
+
+      <h2 className="mt-1 text-2xl font-black text-slate-950">
+        Photos de la réparation
+      </h2>
+
+      <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
+        Retrouvez les différentes étapes de votre réparation :
+        état initial, intervention et résultat final.
+      </p>
+    </div>
+
+    <div className="rounded-2xl bg-slate-50 px-4 py-3 text-sm">
+      <div className="font-black text-slate-900">
+        {photos.length} photo
+        {photos.length > 1 ? "s" : ""}
+      </div>
+
+      <div className="mt-1 text-xs text-slate-500">
+        Toutes les étapes
+      </div>
+    </div>
+
+  </div>
+
+  {/* ======================================================
+      ERREUR
+  ====================================================== */}
+
+  {error && (
+    <div className="mt-6 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+      <div className="font-black">
+        ⚠️ Une erreur est survenue
+      </div>
+
+      <div className="mt-1">
+        {error}
+      </div>
+    </div>
+  )}
+
+  {/* ======================================================
+      ONGLET AVANT / PENDANT / APRÈS
+  ====================================================== */}
+
+  <div className="mt-6 grid gap-3 md:grid-cols-3">
+
+    {PHOTO_TYPES.map((type) => {
+      const active =
+        selectedType === type.value;
+
+      const count =
+        counts[type.value];
+
+      return (
+        <button
+          key={type.value}
+          type="button"
+          onClick={() =>
+            setSelectedType(type.value)
+          }
+          className={
+            "rounded-2xl border p-4 text-left transition " +
+            (active
+              ? "border-blue-400 bg-blue-50 shadow-sm"
+              : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50")
+          }
+        >
+          <div className="flex items-center justify-between gap-3">
+
+            <div className="text-2xl">
+              {type.icon}
+            </div>
+
+            <span
+              className={
+                "rounded-full px-2.5 py-1 text-xs font-black " +
+                (active
+                  ? "bg-blue-600 text-white"
+                  : "bg-slate-100 text-slate-600")
+              }
+            >
+              {count}
+            </span>
+
+          </div>
+
+          <div className="mt-3 font-black text-slate-950">
+            {type.label}
+          </div>
+
+          <div className="mt-1 text-xs leading-5 text-slate-500">
+            {type.description}
+          </div>
+        </button>
+      );
+    })}
+
+  </div>
+
+  {/* ======================================================
+      UPLOAD
+  ====================================================== */}
+
+  <div className="mt-6 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-5">
+
+    <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+
+      <div>
+        <div className="font-black text-slate-900">
+          Ajouter des photos
+        </div>
+
+        <div className="mt-1 text-xs leading-5 text-slate-500">
+          Catégorie sélectionnée :
+          {" "}
+          <strong>
+            {
+              PHOTO_TYPES.find(
+                (item) =>
+                  item.value === selectedType
+              )?.label
+            }
+          </strong>
+        </div>
+
+        <div className="mt-1 text-xs text-slate-400">
+          JPG, PNG ou WebP • 10 Mo maximum par image
+        </div>
+      </div>
+
+      <label
+        className={
+          "inline-flex cursor-pointer items-center justify-center rounded-xl px-5 py-3 text-sm font-black text-white transition " +
+          (uploading
+            ? "cursor-not-allowed bg-slate-400"
+            : "bg-slate-950 hover:bg-slate-800")
+        }
+      >
+        {uploading
+          ? "⏳ Envoi..."
+          : "⬆️ Ajouter des photos"}
+
+        <input
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          multiple
+          disabled={uploading}
+          onChange={handleUpload}
+          className="hidden"
+        />
+      </label>
+
+    </div>
+
+  </div>
+
+  {/* ======================================================
+      CONTENU
+  ====================================================== */}
+
+  {loading ? (
+    <div className="mt-6 rounded-2xl bg-slate-50 p-10 text-center">
+      <div className="font-semibold text-slate-500">
+        Chargement des photos...
+      </div>
+    </div>
+  ) : visiblePhotos.length === 0 ? (
+    <div className="mt-6 rounded-2xl bg-slate-50 p-10 text-center">
+
+      <div className="text-5xl">
+        {
+          PHOTO_TYPES.find(
+            (item) =>
+              item.value === selectedType
+          )?.icon
+        }
+      </div>
+
+      <h3 className="mt-4 text-lg font-black text-slate-950">
+        Aucune photo
+      </h3>
+
+      <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500">
+        Il n'y a pas encore de photo dans cette catégorie.
+      </p>
+
+    </div>
+  ) : (
+    <div className="mt-6 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+
+      {visiblePhotos.map((photo) => (
+        <article
+          key={photo.id}
+          className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
+        >
+
+          {/* IMAGE */}
+
+          <div className="group relative aspect-[4/3] overflow-hidden bg-slate-100">
+
+            <img
+              src={photo.photo_url}
+              alt={
+                photo.caption ||
+                "Photo de réparation"
+              }
+              className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
+            />
+
+            <div className="absolute left-3 top-3">
+              <span className="rounded-full bg-black/70 px-3 py-1 text-xs font-black text-white backdrop-blur">
+                {
+                  PHOTO_TYPES.find(
+                    (item) =>
+                      item.value ===
+                      photo.photo_type
+                  )?.label
+                }
+              </span>
+            </div>
+
+          </div>
+
+          {/* INFOS */}
+
+          <div className="p-4">
+
+            <div className="text-xs font-semibold text-slate-400">
+              Ajoutée le{" "}
+              {formatDate(
+                photo.created_at
+              )}
+            </div>
+
+            {photo.caption && (
+              <p className="mt-2 text-sm leading-6 text-slate-700">
+                {photo.caption}
+              </p>
+            )}
+
+            {/* ACTION */}
+
+            <button
+              type="button"
+              onClick={() =>
+                handleDelete(photo)
+              }
+              disabled={
+                deletingId === photo.id
+              }
+              className="mt-4 w-full rounded-xl border border-red-200 px-4 py-2.5 text-sm font-bold text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {deletingId === photo.id
+                ? "Suppression..."
+                : "🗑️ Supprimer"}
+            </button>
+
+          </div>
+
+        </article>
+      ))}
+
+    </div>
+  )}
+
+  {/* ======================================================
+      RÉSUMÉ
+  ====================================================== */}
+
+  {!loading && photos.length > 0 && (
+    <div className="mt-8 grid gap-3 border-t border-slate-100 pt-6 sm:grid-cols-3">
+
+      <div className="rounded-2xl bg-slate-50 p-4">
+        <div className="text-xs font-bold uppercase text-slate-400">
+          Avant
+        </div>
+
+        <div className="mt-1 text-2xl font-black text-slate-950">
+          {counts.before}
+        </div>
+      </div>
+
+      <div className="rounded-2xl bg-slate-50 p-4">
+        <div className="text-xs font-bold uppercase text-slate-400">
+          Pendant
+        </div>
+
+        <div className="mt-1 text-2xl font-black text-slate-950">
+          {counts.during}
+        </div>
+      </div>
+
+      <div className="rounded-2xl bg-slate-50 p-4">
+        <div className="text-xs font-bold uppercase text-slate-400">
+          Après
+        </div>
+
+        <div className="mt-1 text-2xl font-black text-slate-950">
+          {counts.after}
+        </div>
+      </div>
+
+    </div>
+  )}
+
+</section>
+```
+
+);
+}

@@ -9,7 +9,6 @@ import {
 } from "react";
 
 import { supabase } from "@/lib/supabase";
-import { useLocale } from "next-intl";
 
 type QuoteStatus =
   | "draft"
@@ -143,8 +142,6 @@ export default function RepairQuotes({
   userId,
   userRole,
 }: Props) {
-  const locale = useLocale();
-
   const isClient = userId === clientId;
 
   const isTechnician =
@@ -1198,86 +1195,6 @@ export default function RepairQuotes({
    *
    * Le branchement Stripe devra être ajouté ici.
    */
-  async function startClientPayment(
-    quote: Quote
-  ) {
-    if (!isClient) {
-      setError(
-        "Seul le client peut effectuer le paiement."
-      );
-      return;
-    }
-
-    if (quote.status !== "accepted") {
-      setError(
-        "Le devis doit être accepté avant le paiement."
-      );
-      return;
-    }
-
-    if (
-      quote.payment_status === "paid" ||
-      Number(quote.paid_amount || 0) >=
-        Number(quote.total_ttc || 0)
-    ) {
-      setMessage(
-        "Ce devis est déjà payé. ✅"
-      );
-      return;
-    }
-
-    setPaying(quote.id);
-    setError("");
-    setMessage("");
-
-    try {
-      const response = await fetch(
-        "/api/stripe/create-checkout-session",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type":
-              "application/json",
-          },
-          body: JSON.stringify({
-            quoteId: quote.id,
-                locale,
-          }),
-        }
-      );
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(
-          data.error ||
-            "Impossible de préparer le paiement."
-        );
-      }
-
-      if (!data.url) {
-        throw new Error(
-          "Stripe n'a pas retourné de page de paiement."
-        );
-      }
-
-      window.location.href = data.url;
-    } catch (error) {
-      console.error(
-        "Erreur paiement Stripe:",
-        error
-      );
-
-      setError(
-        error instanceof Error
-          ? error.message
-          : "Impossible de démarrer le paiement."
-      );
-
-      setPaying(null);
-    }
-  }
-
   async function registerPayment(
     quote: Quote
   ) {

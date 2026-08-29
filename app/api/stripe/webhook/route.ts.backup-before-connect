@@ -1,0 +1,294 @@
+import { NextResponse } from "next/server";
+import Stripe from "stripe";
+import { createClient } from "@supabase/supabase-js";
+
+const stripe = new Stripe(
+  process.env.STRIPE_SECRET_KEY || ""
+);
+
+const supabaseAdmin = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL || "",
+  process.env.SUPABASE_SERVICE_ROLE_KEY || ""
+);
+
+export async function POST(request: Request) {
+  const signature =
+    request.headers.get("stripe-signature");
+
+  if (!signature) {
+    return NextResponse.json(
+      { error: "Signature Stripe manquante." },
+      { status: 400 }
+    );
+  }
+
+  try {
+    const body = await request.text();
+
+    const event = stripe.webhooks.constructEvent(
+      body,
+      signature,
+      process.env.STRIPE_WEBHOOK_SECRET || ""
+    );
+
+    if (event.type === "checkout.session.completed") {
+      const session =
+        event.data.object as Stripe.Checkout.Session;
+
+      const quoteId =
+        session.metadata?.quote_id;
+
+      if (!quoteId) {
+        console.error(
+          "quote_id absent des metadata Stripe"
+        );
+
+        return NextResponse.json({
+          received: true,
+        });
+      }
+
+      const amountPaid =
+        (session.amount_total || 0) / 100;
+
+      const currency =
+        String(
+          session.currency || "eur"
+        ).toUpperCase();
+
+      const checkoutSessionId =
+        session.id;
+
+      const paymentIntentId =
+        typeof session.payment_intent === "string"
+          ? session.payment_intent
+          : null;
+
+      /*
+       * Anti-doublon basé sur la session Checkout Stripe.
+       */
+      const {
+        data: existingPayment,
+        error: existingPaymentError,
+      } = await supabaseAdmin
+        .from("repair_quote_payments")
+        .select("id")
+        .eq(
+          "stripe_checkout_session_id",
+          checkoutSessionId
+        )
+        .maybeSingle();
+
+      if (existingPaymentError) {
+        throw existingPaymentError;
+      }
+
+      if (existingPayment) {
+        return NextResponse.json({
+          received: true,
+          duplicate: true,
+        });
+      }
+
+      /*
+       * Récupération du devis.
+       */
+      const {
+        data: quote,
+        error: quoteError,
+      } = await supabaseAdmin
+        .from("repair_quotes")
+        .select("*")
+        .eq("id", quoteId)
+        .single();
+
+      if (quoteError || !quote) {
+        throw new Error(
+          `Devis introuvable : ${quoteId}`
+        );
+      }
+
+      const oldPaidAmount =
+        Number(quote.paid_amount || 0);
+
+      const totalTtc =
+        Number(quote.total_ttc || 0);
+
+      const remaining =
+        Math.max(
+          0,
+          totalTtc - oldPaidAmount
+        );
+
+      if (
+        amountPaid <= 0 ||
+        amountPaid > remaining + 0.01
+      ) {
+        throw new Error(
+          "Montant Stripe incohérent."
+        );
+      }
+
+      /*
+       * Calcul de la commission.
+       */
+      const commissionRate =
+        Number(
+          quote.commission_rate || 0
+        );
+
+      const commissionAmount =
+        amountPaid *
+        commissionRate /
+        100;
+
+      const technicianAmount =
+        amountPaid -
+        commissionAmount;
+
+      /*
+       * Enregistrement du paiement Stripe.
+       */
+      const {
+        error: paymentError,
+      } = await supabaseAdmin
+        .from("repair_quote_payments")
+        .insert({
+          quote_id: quoteId,
+          amount: amountPaid,
+          currency,
+          status: "paid",
+          provider: "stripe",
+
+          provider_payment_id:
+            paymentIntentId ||
+            checkoutSessionId,
+
+          stripe_checkout_session_id:
+            checkoutSessionId,
+
+          stripe_payment_intent_id:
+            paymentIntentId,
+
+          platform_fee_amount:
+            commissionAmount,
+
+          technician_amount:
+            technicianAmount,
+
+          paid_at:
+            new Date().toISOString(),
+        });
+
+      if (paymentError) {
+        throw paymentError;
+      }
+
+      const newPaidAmount =
+        oldPaidAmount + amountPaid;
+
+      const isFullyPaid =
+        newPaidAmount >=
+        totalTtc - 0.01;
+
+      /*
+       * Mise à jour du devis.
+       */
+      const {
+        error: updateError,
+      } = await supabaseAdmin
+        .from("repair_quotes")
+        .update({
+          paid_amount:
+            newPaidAmount,
+
+          payment_status:
+            isFullyPaid
+              ? "paid"
+              : "partial",
+
+          paid_at:
+            new Date().toISOString(),
+
+          payment_reference:
+            paymentIntentId ||
+            checkoutSessionId,
+
+          stripe_checkout_session_id:
+            checkoutSessionId,
+
+          stripe_payment_intent_id:
+            paymentIntentId,
+        })
+        .eq("id", quoteId);
+
+      if (updateError) {
+        throw updateError;
+      }
+
+      /*
+       * Événement financier.
+       */
+      const {
+        error: financialError,
+      } = await supabaseAdmin
+        .from(
+          "repair_quote_financial_events"
+        )
+        .insert({
+          quote_id: quoteId,
+
+          technician_id:
+            quote.technician_id,
+
+          event_type:
+            "stripe_payment",
+
+          amount:
+            amountPaid,
+
+          commission_amount:
+            commissionAmount,
+
+          technician_amount:
+            technicianAmount,
+
+          currency,
+
+          description:
+            `Paiement Stripe ${
+              paymentIntentId ||
+              checkoutSessionId
+            }`,
+        });
+
+      if (financialError) {
+        throw financialError;
+      }
+
+      console.log(
+        "Paiement Stripe enregistré avec succès:",
+        quoteId
+      );
+    }
+
+    return NextResponse.json({
+      received: true,
+    });
+  } catch (error) {
+    console.error(
+      "Webhook Stripe error:",
+      error
+    );
+
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Erreur webhook Stripe.",
+      },
+      { status: 400 }
+    );
+  }
+}

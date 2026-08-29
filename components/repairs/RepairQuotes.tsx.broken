@@ -9,7 +9,6 @@ import {
 } from "react";
 
 import { supabase } from "@/lib/supabase";
-import { useLocale } from "next-intl";
 
 type QuoteStatus =
   | "draft"
@@ -143,8 +142,6 @@ export default function RepairQuotes({
   userId,
   userRole,
 }: Props) {
-  const locale = useLocale();
-
   const isClient = userId === clientId;
 
   const isTechnician =
@@ -1198,6 +1195,7 @@ export default function RepairQuotes({
    *
    * Le branchement Stripe devra être ajouté ici.
    */
+  async function registerPayment(
   async function startClientPayment(
     quote: Quote
   ) {
@@ -1241,7 +1239,6 @@ export default function RepairQuotes({
           },
           body: JSON.stringify({
             quoteId: quote.id,
-                locale,
           }),
         }
       );
@@ -1278,7 +1275,6 @@ export default function RepairQuotes({
     }
   }
 
-  async function registerPayment(
     quote: Quote
   ) {
     const amount = Math.max(
